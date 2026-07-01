@@ -11,6 +11,14 @@ land them in durable storage with a schema that supports horizon arithmetic late
 market collection and all statistical modeling (Gaussian model, calibration, evaluation) are
 explicitly out of scope and will be separate future work.
 
+**Data sourcing split (clarified by user)**: the end goal is a model that exploits correlations
+between weather data and Kalshi weather-market resolutions to find mispricings and make
+risk-optimized bets. This NWS pipeline supplies **only the predictor/feature side** — forecasts
+and observations. Market resolution/settlement outcomes (the training labels) will be ingested
+from a **separate source/pipeline**, not this one. This pipeline should not grow a market-outcome
+collector, even though it'd be easy to justify one as "useful for validation" — that's explicitly
+a different pipeline's job.
+
 The docs agree on the non-negotiable design constraint: **every stored row must carry both the
 forecast-issued timestamp and the valid/resolution timestamp**, because horizon buckets and the
 later chronological train/test split depend on it. They disagree on storage format (parquet vs.
@@ -66,11 +74,12 @@ materially change the plan:
    preliminary high downward, and settlement is explicitly delayed if the reported high isn't
    consistent with the 6-hr/24-hr highs from METAR. Practical implication for this pipeline: the
    `observations` table (sourced from `/stations/{id}/observations`, i.e. raw METAR) is a close
-   **proxy** for the eventual settlement value, not a guaranteed match. Worth stating explicitly
-   in `schema.md`/README as a known limitation, and worth flagging the NWS **CLI product** itself
-   (available as a text bulletin via `api.weather.gov/products`, not the clean JSON endpoints
-   used elsewhere in this plan) as a **v1.1 candidate ingestion target** — out of scope for this
-   build order, but the actual ground truth once real settlement-accuracy comparisons matter.
+   **proxy** for the eventual settlement value, not a guaranteed match — worth stating explicitly
+   in `schema.md`/README as a known limitation. Note this is *not* a gap this pipeline needs to
+   fill: actual market resolution/settlement labels are sourced from a separate pipeline per the
+   user's data-sourcing split above, so this NWS collector doesn't need to also ingest the NWS
+   CLI product as a resolution source of truth. It's mentioned here only as background for why
+   the two won't match exactly, not as a build-order item.
 2. **Confirmed settlement stations per city** (station chosen matters — several cities settle
    against a non-obvious airport):
 
