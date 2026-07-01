@@ -20,9 +20,8 @@ read-modify-write merge logic on every poll; can still export to parquet later i
 Confirmed decisions from user:
 - **Storage**: DuckDB (single local file), not raw parquet.
 - **Locations**: standard Kalshi weather-market cities — NYC, Chicago, Austin, Denver, Miami,
-  Philadelphia. Exact NWS gridpoints/station IDs resolved programmatically per city (see below);
-  exact ASOS/settlement station IDs should be flagged for manual verification against Kalshi's
-  actual contract specs since I can't confirm those with certainty from training data alone.
+  Philadelphia. Settlement station IDs are now **confirmed** (see "Kalshi Settlement Mechanics"
+  below) rather than left to auto-discovery — hardcode them in `config/stations.yaml`.
 - **Execution model**: single idempotent script run (fetch + upsert, then exit) — not a
   long-running daemon. Must be safe to re-run repeatedly (no duplicate rows if NWS hasn't
   refreshed). Designed so a cron/launchd entry can be added later without code changes, and so
@@ -49,8 +48,55 @@ Confirmed API mechanics (fetched live from weather-gov.github.io/api/general-faq
   (parsed from the ISO8601 interval) for free, satisfying the schema requirement above.
 - Observations come from `/stations/{stationId}/observations` (historical, API-side retention is
   limited — days/weeks, not months) and `/stations/{stationId}/observations/latest`.
-  `/gridpoints/{gridId}/{x},{y}/stations` lists nearby stations ordered by distance, for
-  auto-discovery when no explicit override is configured.
+  `/gridpoints/{gridId}/{x},{y}/stations` lists nearby stations ordered by distance, but this is
+  now a **fallback/cross-check only** — see below for why it shouldn't be the primary source of
+  truth for settlement station IDs.
+
+## Kalshi Settlement Mechanics (resolves the station-ID risk flagged earlier)
+
+Researched from Kalshi's own help article (help.kalshi.com weather-markets) and a third-party
+Apify scraper's documented station mapping (apify.com/bigdavidson/kalshi-weather-markets) — the
+Reddit "unofficial guide" thread referenced alongside these could not be fetched (Reddit is
+blocked for WebFetch, no accessible mirror found), so it's not reflected here. Two findings
+materially change the plan:
+
+1. **Kalshi does not settle off live METAR/ASOS observations or NWS forecast data at all.** Per
+   Kalshi's own docs, contracts settle exclusively against **the final NWS Daily Climate Report
+   (the "CLI" text product)**, typically issued the *next morning*. That report can revise a
+   preliminary high downward, and settlement is explicitly delayed if the reported high isn't
+   consistent with the 6-hr/24-hr highs from METAR. Practical implication for this pipeline: the
+   `observations` table (sourced from `/stations/{id}/observations`, i.e. raw METAR) is a close
+   **proxy** for the eventual settlement value, not a guaranteed match. Worth stating explicitly
+   in `schema.md`/README as a known limitation, and worth flagging the NWS **CLI product** itself
+   (available as a text bulletin via `api.weather.gov/products`, not the clean JSON endpoints
+   used elsewhere in this plan) as a **v1.1 candidate ingestion target** — out of scope for this
+   build order, but the actual ground truth once real settlement-accuracy comparisons matter.
+2. **Confirmed settlement stations per city** (station chosen matters — several cities settle
+   against a non-obvious airport):
+
+   | City | Settlement station | Note |
+   |---|---|---|
+   | NYC | `KNYC` (Central Park) | — |
+   | Chicago | `KMDW` (Midway) | **not** O'Hare (`KORD`) |
+   | Austin | `KAUS` | **not** Camp Mabry (`KATT`) |
+   | Denver | `KDEN` | — |
+   | Miami | `KMIA` | — |
+   | Philadelphia | `KPHL` | — |
+
+   This means `resolve_stations.py`'s nearest-station auto-discovery (`/gridpoints/{gridId}/{x},{y}/stations`)
+   must **not** be the default path for these 6 cities — a naive "closest station to the city's
+   lat/lon" lookup is exactly how Chicago or Austin would get resolved to the wrong airport. The
+   architecture flips: `config/stations.yaml` ships with these `obs_station_id` values
+   **hardcoded**, and auto-discovery becomes an optional cross-check/fallback used only when
+   expanding to a city not in this table (with an explicit "unverified, confirm before trusting"
+   flag on anything it resolves).
+3. **DST local-day boundary quirk**: during Daylight Saving Time, Kalshi's "daily high" window
+   for a given market date is 1:00 AM–12:59 AM local time the *following* day, not standard
+   midnight-to-midnight — because the NWS climate report itself uses local standard time
+   underneath. This doesn't change the ingestion schema (timestamps are already stored
+   timezone-aware per station), but it matters for any future daily-aggregation logic built on
+   top of the `observations` table, so it's worth a one-line comment in `schema.md` now rather
+   than a rediscovered bug later.
 
 ## Repository Structure
 
@@ -59,7 +105,8 @@ kalshi_weather/
   pyproject.toml
   .env.example                     # NWS_CONTACT_EMAIL, DUCKDB_PATH, APP_NAME
   config/
-    stations.yaml                  # human-edited: name, lat, lon, optional station_id override
+    stations.yaml                  # human-edited: name, lat, lon, hardcoded obs_station_id
+                                    #   (confirmed Kalshi settlement stations, not auto-discovered)
   src/kalshi_weather/
     __init__.py
     config.py                      # loads .env + stations.yaml into typed settings
@@ -102,7 +149,8 @@ CREATE TABLE IF NOT EXISTS stations (
     grid_y          INTEGER,
     forecast_grid_data_url VARCHAR,
     forecast_hourly_url    VARCHAR,
-    obs_station_id  VARCHAR,               -- e.g. 'KNYC' -- explicit override or nearest-discovered
+    obs_station_id  VARCHAR,               -- confirmed Kalshi settlement station, e.g. 'KNYC'
+                                            -- (hardcoded per city, see Kalshi Settlement Mechanics)
     timezone        VARCHAR,
     resolved_at     TIMESTAMP
 );
@@ -191,13 +239,14 @@ issued-vs-valid pairs to work with.
   offset always being present.
 - **Unit normalization**: grid data `uom` values come back as `wmoUnit:degC` style strings; strip
   the `wmoUnit:` prefix and store the bare unit so later stages don't have to special-case this.
-- **Station ID accuracy is a known open risk**: I do not have verified certainty on which exact
-  ASOS/observation station Kalshi settles each city's contract against (e.g. NYC could be
-  Central Park vs. LaGuardia vs. JFK). `resolve_stations.py` will auto-discover the nearest
-  station via `/gridpoints/{gridId}/{x},{y}/stations` as a default, but `config/stations.yaml`
-  supports an explicit `obs_station_id` override per city — flagging this in the README as
-  "verify against actual Kalshi contract settlement rules before relying on this for real
-  markets" rather than silently guessing.
+- **Station IDs are now hardcoded, not auto-discovered**: the settlement stations for all 6
+  cities are confirmed (`KNYC`, `KMDW`, `KAUS`, `KDEN`, `KMIA`, `KPHL` — see Kalshi Settlement
+  Mechanics above), sourced from a third-party scraper's documented mapping rather than Kalshi's
+  own literal rulebook, so still worth one manual spot-check against a live Kalshi contract page
+  before treating it as gospel — but solid enough to hardcode as the default rather than derive
+  from nearest-station distance, which would silently pick the wrong airport for Chicago/Austin.
+  `resolve_stations.py`'s auto-discovery path stays in the codebase only as a fallback for adding
+  a city not in this table, explicitly flagged "unverified" in its output.
 - **Idempotent-by-design for future hosting**: no in-process state beyond the DuckDB file and the
   `Last-Modified` cache; `DUCKDB_PATH` and `NWS_CONTACT_EMAIL` come from env vars so the same
   script runs unchanged under local cron, GitHub Actions, or a hosted cron service later.
@@ -210,13 +259,16 @@ issued-vs-valid pairs to work with.
 
 ## Build Order
 
-1. `config.py` + `.env.example` + `config/stations.yaml` (6 cities, lat/lon only initially).
+1. `config.py` + `.env.example` + `config/stations.yaml` (6 cities, lat/lon, and the confirmed
+   `obs_station_id` hardcoded per the settlement table above).
 2. `db.py` + `schema.sql` — create tables, verify idempotent `CREATE TABLE IF NOT EXISTS`.
 3. `nws_client.py` with retry/backoff + mandatory User-Agent — unit-test against recorded
    fixtures, no live calls in tests.
-4. `resolve_stations.py` — resolves and persists gridpoint + nearest station metadata; run once
-   live to populate `stations` table and manually sanity-check the resolved grid IDs/station IDs
-   against weather.gov before trusting them.
+4. `resolve_stations.py` — resolves and persists gridpoint metadata (`grid_id`/`grid_x`/`grid_y`/
+   forecast URLs) via `/points`; takes `obs_station_id` from config rather than discovering it,
+   only falling back to nearest-station lookup (flagged unverified) for a city missing from the
+   config table. Run once live and manually sanity-check the resolved grid IDs against
+   weather.gov before trusting them.
 5. `time_utils.py` — interval parsing + horizon math, test-first given how easy this is to get
    subtly wrong.
 6. `ingest.py` + `scripts/run_ingest.py` — full orchestration, per-station error isolation.
