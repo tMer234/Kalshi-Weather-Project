@@ -36,16 +36,28 @@ Confirmed decisions from user:
   it can be lifted into a hosted scheduler (GitHub Actions, Fly.io, Render cron, etc.) later —
   meaning no reliance on local-machine-only state beyond the DuckDB file path (env-configurable).
 
-Confirmed API mechanics (fetched live from weather-gov.github.io/api/general-faqs +
-/api/gridpoints, since training data may be stale):
-- `User-Agent` header is **mandatory** on every request, identifying app + contact email.
-- No hard documented rate limit, but NWS asks for identifiable, well-behaved traffic; must
-  handle 429/503 with backoff. Should respect `Cache-Control`/`Last-Modified` and avoid
+Confirmed API mechanics (fetched live from weather-gov.github.io/api/general-faqs,
+/api/gridpoints, and weather.gov/documentation/services-web-api, since training data may be
+stale):
+- `User-Agent` header is **mandatory** on every request, identifying app + contact email — NWS's
+  own recommended format is `(myweatherapp.com, contact@myweatherapp.com)`; use
+  `NWS_CONTACT_EMAIL` for the contact part per `.env.example`.
+- Rate limit is intentionally undocumented ("not public, but generous for typical use"), but NWS
+  explicitly states 429s should be retried **after ~5 seconds** — bake that as the initial
+  backoff delay in `nws_client.py`'s `tenacity` retry policy rather than guessing a value.
+  Errors follow `application/problem+json`; parse that shape for error messages/logging rather
+  than assuming plain text. Should also respect `Cache-Control`/`Last-Modified` and avoid
   cache-busting query params (causes 400s).
 - Lookup chain: `GET /points/{lat},{lon}` → response `properties.forecast`,
   `properties.forecastHourly`, `properties.forecastGridData`, `properties.observationStations`.
-  `/points` results are stable and should be cached, not re-fetched every run.
+  **Correction**: `/points` results are *not* permanently stable — NWS states the office/gridX/
+  gridY mapping for a location "may occasionally change" (grid redefinitions). `resolve_stations.py`
+  should be safe to re-run periodically (not just once at setup) to catch drift, even though the
+  common case is that it never changes.
 - Coordinates must be given to ≤4 decimal places.
+- Observations lag reality by **up to ~20 minutes** due to upstream MADIS QC processing before
+  they're available via the API — worth knowing so "why isn't the newest reading here yet" doesn't
+  read as an ingestion bug when it's normal latency.
 - The **raw gridpoint data** endpoint (`/gridpoints/{gridId}/{x},{y}`) is the best ingestion
   target, not the human-readable `/forecast` endpoint: it returns numeric time-series "layers"
   (e.g. `maxTemperature`, `minTemperature`, `temperature`, `dewpoint`, `quantitativePrecipitation`,
@@ -234,10 +246,12 @@ issued-vs-valid pairs to work with.
    *all* stations failed or a config/auth error prevented startup, so cron alerting has a
    meaningful signal without being noisy on transient single-station hiccups.
 5. HTTP layer (`nws_client.py`): mandatory `User-Agent`, `tenacity`-based retry with exponential
-   backoff on 429/500/502/503 (a handful of attempts, then give up and let step 4's error
-   handling record it), and pass through `If-Modified-Since` using the last-seen `Last-Modified`
-   per URL (stored alongside `stations` or a small cache table) so unchanged forecasts short
-   -circuit to a cheap 304 instead of a full payload re-parse.
+   backoff on 429/500/502/503 starting at **~5s** (NWS's own documented retry guidance for 429s;
+   a handful of attempts, then give up and let step 4's error handling record it), parsing
+   `application/problem+json` error bodies for the logged message, and passing through
+   `If-Modified-Since` using the last-seen `Last-Modified` per URL (stored alongside `stations` or
+   a small cache table) so unchanged forecasts short-circuit to a cheap 304 instead of a full
+   payload re-parse.
 
 ## Key Implementation Details Worth Calling Out
 
