@@ -1,0 +1,19 @@
+# reference PDFs (large, not source of truth for the repo)
+references/
+
+# local Claude Code settings
+.claude/
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# secrets / local env
+.env
+
+# data & logs
+data/
+logs/
+*.duckdb
