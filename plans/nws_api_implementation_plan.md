@@ -14,10 +14,19 @@ explicitly out of scope and will be separate future work.
 **Data sourcing split (clarified by user)**: the end goal is a model that exploits correlations
 between weather data and Kalshi weather-market resolutions to find mispricings and make
 risk-optimized bets. This NWS pipeline supplies **only the predictor/feature side** — forecasts
-and observations. Market resolution/settlement outcomes (the training labels) will be ingested
-from a **separate source/pipeline**, not this one. This pipeline should not grow a market-outcome
-collector, even though it'd be easy to justify one as "useful for validation" — that's explicitly
-a different pipeline's job.
+and observations. Market resolution/settlement outcomes as Kalshi reports them (which contract
+resolved YES/NO, at what settlement price) will be ingested from a **separate source/pipeline**,
+not this one — this pipeline should not grow a Kalshi-outcome collector.
+
+**Correction from user, refining the split above**: "observations" in this pipeline specifically
+means **the same NWS-sourced daily high/low value Kalshi uses to resolve the contract** (the
+Daily Climate Report / CLI product — see "Kalshi Settlement Mechanics" below), not a generic
+proxy for it. This is still squarely *NWS* data (a different NWS product than the gridpoint
+forecast, not a Kalshi product), so it belongs in this pipeline rather than the separate
+market-resolution pipeline. Put simply: `forecasts` = NWS gridpoint forecast data (unchanged from
+the original plan); `observations` = the NWS Daily Climate Report values for the same
+station/date, i.e. the actual ground truth Kalshi resolves against — not the raw METAR/ASOS feed
+originally planned as a proxy for it.
 
 The docs agree on the non-negotiable design constraint: **every stored row must carry both the
 forecast-issued timestamp and the valid/resolution timestamp**, because horizon buckets and the
@@ -84,14 +93,12 @@ materially change the plan:
    Kalshi's own docs, contracts settle exclusively against **the final NWS Daily Climate Report
    (the "CLI" text product)**, typically issued the *next morning*. That report can revise a
    preliminary high downward, and settlement is explicitly delayed if the reported high isn't
-   consistent with the 6-hr/24-hr highs from METAR. Practical implication for this pipeline: the
-   `observations` table (sourced from `/stations/{id}/observations`, i.e. raw METAR) is a close
-   **proxy** for the eventual settlement value, not a guaranteed match — worth stating explicitly
-   in `schema.md`/README as a known limitation. Note this is *not* a gap this pipeline needs to
-   fill: actual market resolution/settlement labels are sourced from a separate pipeline per the
-   user's data-sourcing split above, so this NWS collector doesn't need to also ingest the NWS
-   CLI product as a resolution source of truth. It's mentioned here only as background for why
-   the two won't match exactly, not as a build-order item.
+   consistent with the 6-hr/24-hr highs from METAR. **This pipeline's `observations` data
+   therefore needs to come from the CLI product itself, not raw METAR** — see the new "NWS Daily
+   Climate Report (CLI) Ingestion" section below for how. Raw METAR (`/stations/{id}/observations`)
+   is no longer the primary observation source; it's retained only as an optional secondary/
+   supplementary table (e.g. for future features about conditions leading up to the report), not
+   as the ground truth for residuals.
 2. **Confirmed settlement stations per city** (station chosen matters — several cities settle
    against a non-obvious airport):
 
@@ -114,10 +121,43 @@ materially change the plan:
 3. **DST local-day boundary quirk**: during Daylight Saving Time, Kalshi's "daily high" window
    for a given market date is 1:00 AM–12:59 AM local time the *following* day, not standard
    midnight-to-midnight — because the NWS climate report itself uses local standard time
-   underneath. This doesn't change the ingestion schema (timestamps are already stored
-   timezone-aware per station), but it matters for any future daily-aggregation logic built on
-   top of the `observations` table, so it's worth a one-line comment in `schema.md` now rather
-   than a rediscovered bug later.
+   underneath. Matters directly now: when assigning `obs_date` to a parsed CLI value, don't
+   naively bucket by UTC or local-midnight-to-midnight; it's worth a one-line comment in
+   `schema.md` regardless so it's not a rediscovered bug later.
+
+## NWS Daily Climate Report (CLI) Ingestion
+
+This is new scope added by the settlement-mechanics research and the user's follow-up
+clarification: `observations` must come from the actual NWS Daily Climate Report, not METAR.
+Mechanically this is a different corner of the NWS API than everything else in this plan — text
+bulletins, not clean JSON — so it deserves its own section.
+
+- **Endpoints**: `/products/types/CLI/locations/{wfoId}` lists recent CLI products for a Weather
+  Forecast Office (WFO); `/products/{productId}` returns the specific product, including its raw
+  text body and `issuanceTime`. The `locationId` here is a **WFO id** (e.g. `OKX` for the NYC
+  area), not the station's ICAO code — and conveniently, `/points/{lat},{lon}` already returns
+  the WFO under `properties.cwa`, so no extra lookup is needed; just store it as `wfo_id` on the
+  `stations` table alongside `grid_id`.
+- **One bulletin can cover multiple sites.** A WFO's CLI product often bundles several stations
+  in its area into one text bulletin (e.g. OKX's CLI report may include Central Park, LaGuardia,
+  and JFK all in the same product, in separate text blocks). The parser must locate the correct
+  station's block by its **spelled-out site name** (CLI text uses names like "CENTRAL PARK", not
+  ICAO codes) — so `config/stations.yaml` needs a `cli_site_name` alias per city, distinct from
+  `obs_station_id`, and this alias should be verified against a real fetched sample before trusting
+  it (station-name headers can vary in exact wording between WFOs).
+- **Text format is semi-structured, not JSON.** CLI products follow NOAA's traditional
+  fixed-width climate report template (roughly: a `TEMPERATURE (F)` section with `MAXIMUM`/
+  `MINIMUM` lines including the time of occurrence, plus precipitation/snowfall sections). This
+  is the single most fragile part of the whole pipeline — minor formatting drift between WFOs or
+  over time is expected. Treat `cli_parser.py` as its own well-tested module with **real recorded
+  sample text per city** as fixtures (not synthetic examples), and fail loudly (log + skip, don't
+  guess) if a station's block or expected fields aren't found in the expected shape.
+- **Revisions happen.** Kalshi's own docs note settlement can be delayed if a preliminary CLI
+  value is later corrected. A re-issued CLI product for a date already ingested should **update**
+  the stored value (not sit alongside it as a duplicate) — but only if the new product's
+  `issuanceTime` is more recent than what's already stored, so a stale re-fetch can never
+  regress a newer corrected value. This is different from `grid_forecasts`'s "keep every
+  vintage" philosophy: here we want the current best-known settlement value, not full history.
 
 ## Repository Structure
 
@@ -126,21 +166,27 @@ kalshi_weather/
   pyproject.toml
   .env.example                     # NWS_CONTACT_EMAIL, DUCKDB_PATH, APP_NAME
   config/
-    stations.yaml                  # human-edited: name, lat, lon, hardcoded obs_station_id
-                                    #   (confirmed Kalshi settlement stations, not auto-discovered)
+    stations.yaml                  # human-edited: name, lat, lon, hardcoded obs_station_id +
+                                    #   cli_site_name (confirmed Kalshi settlement stations,
+                                    #   not auto-discovered)
   src/kalshi_weather/
     __init__.py
     config.py                      # loads .env + stations.yaml into typed settings
     nws_client.py                  # thin requests wrapper: get_points, get_grid_data,
                                     #   get_forecast_hourly, get_nearby_stations,
-                                    #   get_latest_observation, get_observations
+                                    #   get_latest_observation, get_observations,
+                                    #   get_cli_products(wfo_id), get_product(product_id)
                                     #   -- handles User-Agent, retry/backoff, conditional GET
+    cli_parser.py                  # parses raw CLI text bulletins -> per-station
+                                    #   max/min temp + occurrence time + obs_date
     time_utils.py                  # parse ISO8601 interval -> (valid_start, valid_end),
                                     #   horizon_hours(issued, valid_start)
     db.py                          # DuckDB connection + idempotent schema creation
-    schema.sql                     # table DDL (stations, grid_forecasts, observations, ingest_runs)
+    schema.sql                     # table DDL (stations, grid_forecasts, climate_reports,
+                                    #   observations, ingest_runs)
     ingest.py                      # orchestration: resolve stations -> pull grid data ->
-                                    #   pull observations -> upsert -> log run
+                                    #   pull CLI climate reports -> pull METAR (secondary) ->
+                                    #   upsert -> log run
   scripts/
     run_ingest.py                  # CLI entrypoint: single run, exit code reflects success
     resolve_stations.py            # one-off: hits /points + /stations for each configured
@@ -149,8 +195,10 @@ kalshi_weather/
     weather.duckdb                 # gitignored
   tests/
     fixtures/                      # recorded sample JSON responses (points, griddata, obs)
+                                    #   + real recorded CLI product text per city
     test_time_utils.py             # ISO8601 interval parsing, horizon math edge cases
     test_nws_client.py             # mocked HTTP (responses lib), retry/backoff behavior
+    test_cli_parser.py             # CLI text parsing against real recorded per-city fixtures
     test_ingest_upsert.py          # idempotency: run ingest twice against temp DuckDB, assert
                                     #   no duplicate rows; assert new issued_time creates new rows
   logs/                            # gitignored, plain rotating file logs
@@ -159,7 +207,7 @@ kalshi_weather/
 ## Database Schema (DuckDB)
 
 ```sql
--- resolved once via resolve_stations.py, re-resolved only if stale/missing
+-- resolved once via resolve_stations.py, safe to re-run periodically (grid mappings can drift)
 CREATE TABLE IF NOT EXISTS stations (
     station_id      VARCHAR PRIMARY KEY,   -- our slug, e.g. 'nyc', 'chi'
     display_name    VARCHAR,
@@ -172,6 +220,10 @@ CREATE TABLE IF NOT EXISTS stations (
     forecast_hourly_url    VARCHAR,
     obs_station_id  VARCHAR,               -- confirmed Kalshi settlement station, e.g. 'KNYC'
                                             -- (hardcoded per city, see Kalshi Settlement Mechanics)
+    wfo_id          VARCHAR,               -- e.g. 'OKX' -- from /points properties.cwa, used to
+                                            -- look up CLI products for this station's area
+    cli_site_name   VARCHAR,               -- e.g. 'CENTRAL PARK' -- spelled-out name used to find
+                                            -- this station's block within a multi-site CLI bulletin
     timezone        VARCHAR,
     resolved_at     TIMESTAMP
 );
@@ -190,7 +242,25 @@ CREATE TABLE IF NOT EXISTS grid_forecasts (
     PRIMARY KEY (station_id, variable, issued_time, valid_start)
 );
 
--- one row per (station, variable, timestamp)
+-- PRIMARY observation ground truth: one row per (station, calendar date, variable), sourced from
+-- the NWS Daily Climate Report (CLI product) -- the same data Kalshi settles against.
+CREATE TABLE IF NOT EXISTS climate_reports (
+    station_id      VARCHAR REFERENCES stations(station_id),
+    obs_date        DATE,                  -- calendar date the report covers (local standard
+                                            -- time day -- see DST local-day boundary note above)
+    variable        VARCHAR,               -- 'max_temp', 'min_temp', 'precip', 'snowfall', ...
+    value           DOUBLE,
+    value_time      TIMESTAMP,             -- time-of-day the max/min occurred, if the report gives it
+    unit            VARCHAR,
+    product_id      VARCHAR,               -- NWS product ID this row was parsed from (traceability)
+    issued_time     TIMESTAMP,             -- product's issuanceTime
+    pulled_at       TIMESTAMP,
+    PRIMARY KEY (station_id, obs_date, variable)
+);
+
+-- SECONDARY/optional: raw METAR feed, one row per (station, variable, timestamp). Kept only as a
+-- supplementary signal (e.g. conditions leading up to the report) -- NOT the residual ground
+-- truth; that's climate_reports above. Safe to defer/skip in an initial build if time-constrained.
 CREATE TABLE IF NOT EXISTS observations (
     obs_station_id  VARCHAR,
     variable        VARCHAR,
@@ -216,12 +286,20 @@ CREATE TABLE IF NOT EXISTS ingest_runs (
 );
 ```
 
-Upsert semantics: `INSERT INTO ... ON CONFLICT (...) DO NOTHING`. This is deliberate — if NWS
-hasn't re-issued a forecast since the last poll, re-running the script is a pure no-op on that
-row. If NWS *has* re-issued (new `updateTime`), the new `issued_time` makes the primary key
-different, so it lands as a **new row** rather than overwriting history — we want every forecast
-vintage retained, not just the latest, so later Stage-1 horizon analysis has real
-issued-vs-valid pairs to work with.
+Upsert semantics differ by table, deliberately:
+- `grid_forecasts`/`observations`: `INSERT INTO ... ON CONFLICT (...) DO NOTHING`. If NWS hasn't
+  re-issued a forecast since the last poll, re-running the script is a pure no-op on that row. If
+  NWS *has* re-issued (new `updateTime`), the new `issued_time` makes the primary key different,
+  so it lands as a **new row** rather than overwriting history — we want every forecast vintage
+  retained, not just the latest, so later Stage-1 horizon analysis has real issued-vs-valid pairs
+  to work with.
+- `climate_reports`: `INSERT INTO ... ON CONFLICT (station_id, obs_date, variable) DO UPDATE SET
+  value = excluded.value, value_time = excluded.value_time, product_id = excluded.product_id,
+  issued_time = excluded.issued_time, pulled_at = excluded.pulled_at WHERE excluded.issued_time >
+  climate_reports.issued_time`. This is intentionally different — a corrected/re-issued CLI
+  product for a date we already have should **overwrite** the stored value (we want the current
+  best-known settlement-equivalent value, not every historical vintage), but the `WHERE` guard
+  ensures a stale re-fetch can never regress a value that's already been corrected.
 
 ## Ingestion Flow (`ingest.py`)
 
@@ -237,10 +315,18 @@ issued-vs-valid pairs to work with.
       "only 2 fields" approach so it's robust to which markets get added later), iterate its
       `values` list, parse each `validTime` interval via `time_utils.parse_interval`, compute
       `horizon_hours`, and stage rows for upsert.
-   b. `GET /stations/{obs_station_id}/observations` (bounded to, say, last 7 days by default —
-      configurable) for verified observed values, staged the same way.
-   c. Upsert staged rows into DuckDB inside a transaction per station.
-   d. Write one `ingest_runs` row per (station, endpoint) with status/row-count/error.
+   b. `GET /products/types/CLI/locations/{wfo_id}` to list recent CLI products for the station's
+      WFO, then `GET /products/{productId}` for each new-to-us product (dedupe against
+      `product_id`s already in `climate_reports`/an ingest-runs-based "seen products" check).
+      Parse the raw text via `cli_parser.py`, locating this station's block by `cli_site_name`,
+      extracting max/min temp + occurrence time (and precip/snowfall if present) plus the
+      `obs_date` the report covers. Stage rows for `climate_reports` upsert (update-on-newer-
+      issuance semantics, not append-only — see Upsert semantics above).
+   c. (secondary, can be deferred) `GET /stations/{obs_station_id}/observations` (bounded to,
+      say, last 7 days by default — configurable) for supplementary raw METAR values, staged into
+      `observations`.
+   d. Upsert staged rows into DuckDB inside a transaction per station.
+   e. Write one `ingest_runs` row per (station, endpoint) with status/row-count/error.
 4. Non-fatal per-station error handling: a failure fetching/parsing one station must not abort
    the others — catch, log to `ingest_runs.error`, continue. Script exit code is non-zero only if
    *all* stations failed or a config/auth error prevented startup, so cron alerting has a
@@ -273,6 +359,11 @@ issued-vs-valid pairs to work with.
 - **Idempotent-by-design for future hosting**: no in-process state beyond the DuckDB file and the
   `Last-Modified` cache; `DUCKDB_PATH` and `NWS_CONTACT_EMAIL` come from env vars so the same
   script runs unchanged under local cron, GitHub Actions, or a hosted cron service later.
+- **CLI text parsing is the highest-risk part of this pipeline**: unlike every other endpoint used
+  here, CLI products are free-text bulletins, not JSON — treat `cli_parser.py` as needing
+  disproportionately more test coverage (real per-city recorded fixtures, not synthetic ones) than
+  the rest of the codebase, and design it to fail loudly (skip + log) rather than silently
+  misparse when a station's block or expected fields don't match the anticipated shape.
 
 ## Dependencies
 
@@ -284,22 +375,34 @@ issued-vs-valid pairs to work with.
 
 1. `config.py` + `.env.example` + `config/stations.yaml` (6 cities, lat/lon, and the confirmed
    `obs_station_id` hardcoded per the settlement table above).
-2. `db.py` + `schema.sql` — create tables, verify idempotent `CREATE TABLE IF NOT EXISTS`.
+2. `db.py` + `schema.sql` — create tables (including `climate_reports`), verify idempotent
+   `CREATE TABLE IF NOT EXISTS`.
 3. `nws_client.py` with retry/backoff + mandatory User-Agent — unit-test against recorded
    fixtures, no live calls in tests.
 4. `resolve_stations.py` — resolves and persists gridpoint metadata (`grid_id`/`grid_x`/`grid_y`/
-   forecast URLs) via `/points`; takes `obs_station_id` from config rather than discovering it,
-   only falling back to nearest-station lookup (flagged unverified) for a city missing from the
-   config table. Run once live and manually sanity-check the resolved grid IDs against
-   weather.gov before trusting them.
+   forecast URLs, `wfo_id`) via `/points`; takes `obs_station_id` from config rather than
+   discovering it, only falling back to nearest-station lookup (flagged unverified) for a city
+   missing from the config table. Run once live and manually sanity-check the resolved grid IDs
+   against weather.gov before trusting them.
 5. `time_utils.py` — interval parsing + horizon math, test-first given how easy this is to get
    subtly wrong.
-6. `ingest.py` + `scripts/run_ingest.py` — full orchestration, per-station error isolation.
-7. `tests/test_ingest_upsert.py` — the idempotency test is the most important one: run twice
-   against a temp DuckDB, assert row counts don't double.
-8. Manual end-to-end run against the live API for all 6 cities, eyeball the resulting DuckDB
-   tables (`duckdb data/weather.duckdb` → `SELECT * FROM grid_forecasts LIMIT 20;`), then document
-   a cron entry (e.g. hourly) in the README as the "how to schedule this" follow-up.
+6. `cli_parser.py` — fetch one real CLI product per city first (manually, via `nws_client.py`),
+   save as a fixture, then write the parser test-first against those real fixtures. Confirm
+   `cli_site_name` per city actually matches what appears in the fetched text before trusting
+   `config/stations.yaml`'s aliases. This step should be expected to take longer than the
+   JSON-endpoint work given the text-parsing risk noted above.
+7. `ingest.py` + `scripts/run_ingest.py` — full orchestration (grid forecasts + CLI climate
+   reports; METAR `observations` can be stubbed/deferred if time-constrained), per-station error
+   isolation.
+8. `tests/test_ingest_upsert.py` — the idempotency test is the most important one: run twice
+   against a temp DuckDB, assert row counts don't double for `grid_forecasts`, and separately
+   assert `climate_reports` correctly *updates* (not duplicates) when a re-ingested product has a
+   newer `issuanceTime`.
+9. Manual end-to-end run against the live API for all 6 cities, eyeball the resulting DuckDB
+   tables (`duckdb data/weather.duckdb` → `SELECT * FROM grid_forecasts LIMIT 20;` and
+   `SELECT * FROM climate_reports;`), spot-check a couple of `climate_reports` rows against the
+   raw CLI text by eye, then document a cron entry (e.g. hourly for forecasts, once-daily-morning
+   for CLI) in the README as the "how to schedule this" follow-up.
 
 ## Verification
 
@@ -307,4 +410,10 @@ issued-vs-valid pairs to work with.
 - One live manual run of `scripts/run_ingest.py`, followed by ad hoc DuckDB queries to confirm:
   row counts per station/variable are sane, `issued_time`/`valid_start`/`horizon_hours` line up
   correctly for a couple of spot-checked rows against the raw JSON, and re-running the script
-  immediately after produces zero new rows (proving the idempotent upsert works).
+  immediately after produces zero new rows for `grid_forecasts` (proving the idempotent upsert
+  works).
+- Specifically for `climate_reports`: manually compare a handful of parsed rows against the raw
+  CLI product text (by eye) to confirm `cli_site_name` matching and max/min extraction are
+  correct for each of the 6 cities, and confirm re-running against an unchanged CLI product
+  doesn't spuriously bump `pulled_at`/overwrite with identical values (the `WHERE issued_time >`
+  guard should make this a no-op).
