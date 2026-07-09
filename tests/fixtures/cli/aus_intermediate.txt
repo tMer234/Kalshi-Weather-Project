@@ -1,0 +1,59 @@
+
+000
+CDUS44 KEWX 092147
+CLIAUS
+
+CLIMATE REPORT 
+NATIONAL WEATHER SERVICE AUSTIN/SAN ANTONIO
+447 PM CDT THU JUL 09 2026
+
+...................................
+
+...THE AUSTIN BERGSTROM CLIMATE SUMMARY FOR JULY 9 2026...
+VALID AS OF 0400 PM LOCAL TIME.
+
+CLIMATE NORMAL PERIOD: 1991 TO 2020
+CLIMATE RECORD PERIOD: 1943 TO 2026
+
+
+WEATHER ITEM   OBSERVED TIME   RECORD YEAR NORMAL DEPARTURE           
+                VALUE   (LST)  VALUE       VALUE  FROM               
+                                                  NORMAL           
+................................................................
+TEMPERATURE (F)                                                          
+ TODAY                                                               
+  MAXIMUM         98   2:44 PM 104    2009  95      3                 
+                                      2022                           
+  MINIMUM         73   6:08 AM  67    2000  73      0                 
+                                      2014                           
+  AVERAGE         86                                               
+
+PRECIPITATION (IN)                                                    
+  TODAY            0.00          3.96 1961   0.07  -0.07              
+  MONTH TO DATE    0.00                      0.73  -0.73              
+  SINCE JUN 1      5.62                      4.10   1.52              
+  SINCE JAN 1     20.42                     19.10   1.32              
+
+................................................................
+
+
+THE AUSTIN BERGSTROM CLIMATE NORMALS FOR TOMORROW
+                         NORMAL    RECORD    YEAR                     
+ MAXIMUM TEMPERATURE (F)   95       106      2022                      
+ MINIMUM TEMPERATURE (F)   73        65      2014                      
+
+
+SUNRISE AND SUNSET                                                    
+JULY  9 2026..........SUNRISE   6:36 AM CDT   SUNSET   8:35 PM CDT     
+JULY 10 2026..........SUNRISE   6:37 AM CDT   SUNSET   8:35 PM CDT     
+
+
+-  INDICATES NEGATIVE NUMBERS.
+R  INDICATES RECORD WAS SET OR TIED.
+MM INDICATES DATA IS MISSING.
+T  INDICATES TRACE AMOUNT.
+
+
+
+
+$$

@@ -1,0 +1,74 @@
+{
+  "nyc": [
+    {
+      "kind": "intermediate",
+      "id": "026b4f75-d7b6-43da-8834-e761113268e5",
+      "issuanceTime": "2026-07-09T20:35:00+00:00"
+    },
+    {
+      "kind": "final",
+      "id": "c376feda-ac0c-4222-a410-d3b43f4b3c7a",
+      "issuanceTime": "2026-07-09T06:26:00+00:00"
+    }
+  ],
+  "chi": [
+    {
+      "kind": "intermediate",
+      "id": "718aa241-2691-4fa5-897d-69cb8ed823af",
+      "issuanceTime": "2026-07-09T21:34:00+00:00"
+    },
+    {
+      "kind": "final",
+      "id": "92550466-9e40-4b76-bae4-ee101f230f10",
+      "issuanceTime": "2026-07-09T06:34:00+00:00"
+    }
+  ],
+  "aus": [
+    {
+      "kind": "intermediate",
+      "id": "4518a995-f8ad-4692-b2f9-17571ce3faf9",
+      "issuanceTime": "2026-07-09T21:47:00+00:00"
+    },
+    {
+      "kind": "final",
+      "id": "300e878b-0868-44e4-99ab-1d123c5b5b6a",
+      "issuanceTime": "2026-07-09T06:58:00+00:00"
+    }
+  ],
+  "den": [
+    {
+      "kind": "intermediate",
+      "id": "5c1e2153-31a8-4f18-9a87-bff3ed474cba",
+      "issuanceTime": "2026-07-09T12:31:00+00:00"
+    },
+    {
+      "kind": "final",
+      "id": "3cd33912-e727-4be3-992a-1354d8266d65",
+      "issuanceTime": "2026-07-09T07:35:00+00:00"
+    }
+  ],
+  "mia": [
+    {
+      "kind": "intermediate",
+      "id": "1a69987e-e1e1-4209-b176-c00327ff7f81",
+      "issuanceTime": "2026-07-09T20:21:00+00:00"
+    },
+    {
+      "kind": "final",
+      "id": "97a352f3-d315-44d2-b2ff-c1939db06ab9",
+      "issuanceTime": "2026-07-09T08:25:00+00:00"
+    }
+  ],
+  "phl": [
+    {
+      "kind": "intermediate",
+      "id": "915dbe36-2070-44ca-9a57-28923776e3ac",
+      "issuanceTime": "2026-07-09T21:39:00+00:00"
+    },
+    {
+      "kind": "final",
+      "id": "edc05d1d-ebad-4eac-8cb3-1b55a9bf1b81",
+      "issuanceTime": "2026-07-09T05:52:00+00:00"
+    }
+  ]
+}

@@ -1,0 +1,101 @@
+
+000
+CDUS44 KEWX 090658
+CLIAUS
+
+CLIMATE REPORT 
+NATIONAL WEATHER SERVICE AUSTIN/SAN ANTONIO
+158 AM CDT THU JUL 09 2026
+
+...................................
+
+...THE AUSTIN BERGSTROM CLIMATE SUMMARY FOR JULY 8 2026...
+
+CLIMATE NORMAL PERIOD: 1991 TO 2020
+CLIMATE RECORD PERIOD: 1943 TO 2026
+
+
+WEATHER ITEM   OBSERVED TIME   RECORD YEAR NORMAL DEPARTURE LAST      
+                VALUE   (LST)  VALUE       VALUE  FROM      YEAR     
+                                                  NORMAL           
+...................................................................
+TEMPERATURE (F)                                                          
+ YESTERDAY                                                           
+  MAXIMUM         99   3:38 PM 105    2009  95      4       94        
+  MINIMUM         74   5:03 AM  68    2000  73      1       72        
+                                      2008                           
+  AVERAGE         87                        84      3       83     
+
+PRECIPITATION (IN)                                                    
+  YESTERDAY        0.00          1.96 1973   0.08  -0.08      T       
+  MONTH TO DATE    0.00                      0.66  -0.66     2.36     
+  SINCE JUN 1      5.62                      4.03   1.59     4.80     
+  SINCE JAN 1     20.42                     19.03   1.39    19.06     
+
+SNOWFALL (IN)                                                              
+  YESTERDAY        0.0                                                
+  MONTH TO DATE    0.0                                                
+  SINCE JUN 1      0.0                                                
+  SINCE JUL 1      0.0                                                
+  SNOW DEPTH       0                                                 
+
+DEGREE DAYS                                                           
+ HEATING                                                              
+  YESTERDAY        0                         0      0        0        
+  MONTH TO DATE    0                         0      0        0        
+  SINCE JUN 1      0                         0      0        0        
+  SINCE JUL 1      0                         0      0        0        
+
+ COOLING                                                              
+  YESTERDAY       22                        19      3       18        
+  MONTH TO DATE  168                       150     18      134        
+  SINCE JUN 1    727                       667     60      697        
+  SINCE JAN 1   1570                      1246    324     1543        
+...................................................................
+
+
+WIND (MPH)                                                            
+  HIGHEST WIND SPEED    21   HIGHEST WIND DIRECTION     S (180)       
+  HIGHEST GUST SPEED    27   HIGHEST GUST DIRECTION     S (180)       
+  AVERAGE WIND SPEED     9.6                                        
+
+
+SKY COVER                                                             
+  AVERAGE SKY COVER 0.3                                                 
+
+
+WEATHER CONDITIONS                                                    
+THE FOLLOWING WEATHER WAS RECORDED YESTERDAY.                         
+  NO SIGNIFICANT WEATHER WAS OBSERVED.                                  
+
+
+RELATIVE HUMIDITY (PERCENT)
+ HIGHEST    94           5:00 AM                                      
+ LOWEST     33           5:00 PM                                      
+ AVERAGE    64                                                        
+
+..........................................................
+
+
+THE AUSTIN BERGSTROM CLIMATE NORMALS FOR TODAY
+                         NORMAL    RECORD    YEAR                     
+ MAXIMUM TEMPERATURE (F)   95       104      2009                      
+                                             2022                     
+ MINIMUM TEMPERATURE (F)   73        67      2000                      
+                                             2014                     
+
+
+SUNRISE AND SUNSET                                                    
+JULY  9 2026..........SUNRISE   6:36 AM CDT   SUNSET   8:35 PM CDT     
+JULY 10 2026..........SUNRISE   6:37 AM CDT   SUNSET   8:35 PM CDT     
+
+
+-  INDICATES NEGATIVE NUMBERS.
+R  INDICATES RECORD WAS SET OR TIED.
+MM INDICATES DATA IS MISSING.
+T  INDICATES TRACE AMOUNT.
+
+
+
+
+$$

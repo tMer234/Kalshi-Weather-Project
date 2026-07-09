@@ -1,0 +1,31 @@
+[project]
+name = "kalshi-weather"
+version = "0.1.0"
+description = "NWS data ingestion pipeline (gridpoint forecasts + Daily Climate Reports) for Kalshi weather-market modeling"
+requires-python = ">=3.10"
+dependencies = [
+    "duckdb>=1.1",
+    "requests>=2.32",
+    "tenacity>=9.0",
+    "isodate>=0.7",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0",
+    "typer>=0.15",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "responses>=0.25",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

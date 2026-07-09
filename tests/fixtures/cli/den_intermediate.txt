@@ -1,0 +1,70 @@
+
+000
+CDUS45 KBOU 091231
+CLIDEN
+
+CLIMATE REPORT 
+NATIONAL WEATHER SERVICE DENVER/BOULDER
+631 AM MDT THU JUL 09 2026
+
+...................................
+
+...THE DENVER CO CLIMATE SUMMARY FOR JULY 9 2026...
+VALID AS OF 0600 AM LOCAL TIME.
+
+CLIMATE NORMAL PERIOD 1991 TO 2020
+CLIMATE RECORD PERIOD 1872 TO 2026
+
+
+WEATHER ITEM   OBSERVED TIME   RECORD YEAR NORMAL DEPARTURE LAST      
+                VALUE   (LST)  VALUE       VALUE  FROM      YEAR     
+                                                  NORMAL           
+...................................................................
+TEMPERATURE (F)                                                          
+ TODAY                                                               
+  MAXIMUM         65    103 AM 100    2022  90    -25      100       
+  MINIMUM         57    324 AM  43    1876  60     -3       63       
+  AVERAGE         61                        75    -14       82     
+
+PRECIPITATION (IN)                                                    
+  TODAY            0.04          1.34 1990   0.06  -0.02              
+  MONTH TO DATE    0.10                      0.52  -0.42              
+  SINCE JAN 1      4.75                      7.95  -3.20              
+
+...................................................................
+
+
+WIND (MPH)                                                            
+  HIGHEST WIND SPEED    17   HIGHEST WIND DIRECTION    NE (60)        
+  HIGHEST GUST SPEED    MM   HIGHEST GUST DIRECTION    MM            
+  AVERAGE WIND SPEED     9.7                                        
+
+
+RELATIVE HUMIDITY (PERCENT)
+ HIGHEST    87           300 AM                                      
+ LOWEST     63          1200 AM                                      
+ AVERAGE    75                                                        
+
+..........................................................
+
+
+THE DENVER CO CLIMATE NORMALS FOR TOMORROW
+                         NORMAL    RECORD    YEAR                     
+ MAXIMUM TEMPERATURE (F)   90       102      2016                      
+ MINIMUM TEMPERATURE (F)   60        45      1895                      
+
+
+SUNRISE AND SUNSET                                                    
+JULY  9 2026..........SUNRISE   539 AM MDT   SUNSET   829 PM MDT     
+JULY 10 2026..........SUNRISE   539 AM MDT   SUNSET   828 PM MDT     
+
+
+-  INDICATES NEGATIVE NUMBERS.
+R  INDICATES RECORD WAS SET OR TIED.
+MM INDICATES DATA IS MISSING.
+T  INDICATES TRACE AMOUNT.
+
+
+
+
+$$

@@ -1,0 +1,99 @@
+
+000
+CDUS41 KPHI 090552
+CLIPHL
+
+CLIMATE REPORT 
+NATIONAL WEATHER SERVICE MOUNT HOLLY NJ
+152 AM EDT THU JUL 09 2026
+
+...................................
+
+...THE PHILADELPHIA PA CLIMATE SUMMARY FOR JULY 8 2026...
+
+CLIMATE NORMAL PERIOD: 1991 TO 2020
+CLIMATE RECORD PERIOD: 1872 TO 2026
+
+
+WEATHER ITEM   OBSERVED TIME   RECORD YEAR NORMAL DEPARTURE LAST      
+                VALUE   (LST)  VALUE       VALUE  FROM      YEAR     
+                                                  NORMAL           
+...................................................................
+TEMPERATURE (F)                                                          
+ YESTERDAY                                                           
+  MAXIMUM         86   4:24 PM 100    1993  88     -2       96        
+  MINIMUM         70   6:34 AM  53    1960  69      1       74        
+  AVERAGE         78                        79     -1       85     
+
+PRECIPITATION (IN)                                                    
+  YESTERDAY        0.00          2.28 1964   0.11  -0.11     1.04     
+  MONTH TO DATE    2.39                      0.97   1.42     2.01     
+  SINCE JUN 1      5.79                      5.01   0.78     4.21     
+  SINCE JAN 1     17.65                     21.66  -4.01    21.60     
+
+SNOWFALL (IN)                                                              
+  YESTERDAY        0.0           0.0  1870   0.0    0.0      0.0      
+  MONTH TO DATE    0.0                       0.0    0.0      0.0      
+  SINCE JUN 1      0.0                       0.0    0.0      0.0      
+  SINCE JUL 1      0.0                       0.0    0.0      0.0      
+  SNOW DEPTH       0                                                 
+
+DEGREE DAYS                                                           
+ HEATING                                                              
+  YESTERDAY        0                         0      0        0        
+  MONTH TO DATE    0                         0      0        0        
+  SINCE JUN 1      0                         7     -7        8        
+  SINCE JUL 1      0                         0      0        0        
+
+ COOLING                                                              
+  YESTERDAY       13                        14     -1       20        
+  MONTH TO DATE  151                       106     45      130        
+  SINCE JUN 1    510                       372    138      457        
+  SINCE JAN 1    687                       470    217      556        
+...................................................................
+
+
+WIND (MPH)                                                            
+  HIGHEST WIND SPEED    14   HIGHEST WIND DIRECTION     S (200)       
+  HIGHEST GUST SPEED    18   HIGHEST GUST DIRECTION    NE (30)        
+  AVERAGE WIND SPEED     6.6                                        
+
+
+SKY COVER                                                             
+  POSSIBLE SUNSHINE  MM                                                 
+  AVERAGE SKY COVER 0.6                                                 
+
+
+WEATHER CONDITIONS                                                    
+THE FOLLOWING WEATHER WAS RECORDED YESTERDAY.                         
+  NO SIGNIFICANT WEATHER WAS OBSERVED.                                  
+
+
+RELATIVE HUMIDITY (PERCENT)
+ HIGHEST    81           3:00 AM                                      
+ LOWEST     51           4:00 PM                                      
+ AVERAGE    66                                                        
+
+..........................................................
+
+
+THE PHILADELPHIA PA CLIMATE NORMALS FOR TODAY
+                         NORMAL    RECORD    YEAR                     
+ MAXIMUM TEMPERATURE (F)   88       103      1936                      
+ MINIMUM TEMPERATURE (F)   70        53      1963                      
+
+
+SUNRISE AND SUNSET                                                    
+JULY  9 2026..........SUNRISE   5:41 AM EDT   SUNSET   8:31 PM EDT     
+JULY 10 2026..........SUNRISE   5:42 AM EDT   SUNSET   8:31 PM EDT     
+
+
+-  INDICATES NEGATIVE NUMBERS.
+R  INDICATES RECORD WAS SET OR TIED.
+MM INDICATES DATA IS MISSING.
+T  INDICATES TRACE AMOUNT.
+
+
+
+
+$$

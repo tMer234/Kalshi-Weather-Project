@@ -1,0 +1,11 @@
+duckdb>=1.1
+requests>=2.32
+tenacity>=9.0
+isodate>=0.7
+pyyaml>=6.0
+python-dotenv>=1.0
+typer>=0.15
+
+[dev]
+pytest>=8.0
+responses>=0.25

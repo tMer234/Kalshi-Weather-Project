@@ -1,0 +1,61 @@
+# Kalshi weather-market cities and their CONFIRMED settlement stations.
+#
+# obs_station_id is hardcoded (not auto-discovered) because Kalshi settles against specific,
+# sometimes non-obvious stations: Chicago is Midway (KMDW), NOT O'Hare; Austin is KAUS, NOT
+# Camp Mabry. Nearest-station auto-discovery would silently pick the wrong airport.
+#
+# cli_site_name is the spelled-out site name as it appears in the WFO's Daily Climate Report
+# (CLI) text — used to match a station's bulletin, since CLI text never uses ICAO codes.
+# These strings are verified against real fetched CLI products (see tests/fixtures/cli/).
+#
+# lat/lon are the settlement station's own coordinates (so the gridpoint forecast covers the
+# spot the contract actually resolves at), to <=4 decimal places as the NWS API requires.
+
+stations:
+  - station_id: nyc
+    display_name: "New York City (Central Park)"
+    lat: 40.7789
+    lon: -73.9692
+    obs_station_id: KNYC
+    cli_site_name: "CENTRAL PARK"
+    timezone: America/New_York
+
+  - station_id: chi
+    display_name: "Chicago (Midway)"
+    lat: 41.7861
+    lon: -87.7522
+    obs_station_id: KMDW
+    cli_site_name: "CHICAGO-MIDWAY"
+    timezone: America/Chicago
+
+  - station_id: aus
+    display_name: "Austin (Bergstrom Intl)"
+    lat: 30.1945
+    lon: -97.6699
+    obs_station_id: KAUS
+    cli_site_name: "AUSTIN BERGSTROM"
+    timezone: America/Chicago
+
+  - station_id: den
+    display_name: "Denver (Intl Airport)"
+    lat: 39.8467
+    lon: -104.6562
+    obs_station_id: KDEN
+    cli_site_name: "DENVER"
+    timezone: America/Denver
+
+  - station_id: mia
+    display_name: "Miami (Intl Airport)"
+    lat: 25.7906
+    lon: -80.3164
+    obs_station_id: KMIA
+    cli_site_name: "MIAMI"
+    timezone: America/New_York
+
+  - station_id: phl
+    display_name: "Philadelphia (Intl Airport)"
+    lat: 39.8683
+    lon: -75.2431
+    obs_station_id: KPHL
+    cli_site_name: "PHILADELPHIA"
+    timezone: America/New_York

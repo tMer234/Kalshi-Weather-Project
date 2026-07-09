@@ -1,0 +1,99 @@
+
+000
+CDUS45 KBOU 090735
+CLIDEN
+
+CLIMATE REPORT 
+NATIONAL WEATHER SERVICE DENVER/BOULDER
+135 AM MDT THU JUL 09 2026
+
+...................................
+
+...THE DENVER CO CLIMATE SUMMARY FOR JULY 8 2026...
+
+CLIMATE NORMAL PERIOD 1991 TO 2020
+CLIMATE RECORD PERIOD 1872 TO 2026
+
+
+WEATHER ITEM   OBSERVED TIME   RECORD YEAR NORMAL DEPARTURE LAST      
+                VALUE   (LST)  VALUE       VALUE  FROM      YEAR     
+                                                  NORMAL           
+...................................................................
+TEMPERATURE (F)                                                          
+ YESTERDAY                                                           
+  MAXIMUM         94   1212 PM 103    1989  90      4       96       
+  MINIMUM         60   1103 PM  45    1952  59      1       59       
+  AVERAGE         77                        75      2       78     
+
+PRECIPITATION (IN)                                                    
+  YESTERDAY        T             0.93 1909   0.05  -0.05     0.00     
+  MONTH TO DATE    0.06                      0.46  -0.40     0.41     
+  SINCE OCT 1      5.27                      9.87  -4.60    10.88     
+  SINCE JAN 1      4.71                      7.89  -3.18     8.75     
+
+SNOWFALL (IN)                                                              
+  YESTERDAY        0.0                                                
+  MONTH TO DATE    0.0                                                
+  SINCE JUN 1      0.0                                                
+  SINCE JUL 1      0.0                                                
+  SNOW DEPTH       0                                                 
+
+DEGREE DAYS                                                           
+ HEATING                                                              
+  YESTERDAY        0                         0      0        0        
+  MONTH TO DATE    0                         0      0        0        
+  SINCE JUN 1      8                        52    -44       35        
+  SINCE JUL 1      0                         0      0        0        
+
+ COOLING                                                              
+  YESTERDAY       12                        10      2       13        
+  MONTH TO DATE   91                        71     20       83        
+  SINCE JUN 1    252                       218     34      244        
+  SINCE JAN 1    290                       245     45      261        
+...................................................................
+
+
+WIND (MPH)                                                            
+  HIGHEST WIND SPEED    39   HIGHEST WIND DIRECTION    NW (310)       
+  HIGHEST GUST SPEED    49   HIGHEST GUST DIRECTION    NW (310)       
+  AVERAGE WIND SPEED    11.7                                        
+
+
+SKY COVER                                                             
+  POSSIBLE SUNSHINE  MM                                                 
+  AVERAGE SKY COVER 0.5                                                 
+
+
+WEATHER CONDITIONS                                                    
+THE FOLLOWING WEATHER WAS RECORDED YESTERDAY.                         
+  THUNDERSTORM                                                        
+
+
+RELATIVE HUMIDITY (PERCENT)
+ HIGHEST    75          1100 PM                                      
+ LOWEST     16           100 PM                                      
+ AVERAGE    46                                                        
+
+..........................................................
+
+
+THE DENVER CO CLIMATE NORMALS FOR TODAY
+                         NORMAL    RECORD    YEAR                     
+ MAXIMUM TEMPERATURE (F)   90       100      2022                      
+ MINIMUM TEMPERATURE (F)   60        43      1876                      
+
+
+SUNRISE AND SUNSET                                                    
+JULY  9 2026..........SUNRISE   539 AM MDT   SUNSET   829 PM MDT     
+JULY 10 2026..........SUNRISE   539 AM MDT   SUNSET   828 PM MDT     
+
+
+-  INDICATES NEGATIVE NUMBERS.
+R  INDICATES RECORD WAS SET OR TIED.
+MM INDICATES DATA IS MISSING.
+T  INDICATES TRACE AMOUNT.
+
+
+
+
+$$

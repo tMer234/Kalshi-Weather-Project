@@ -1,0 +1,92 @@
+
+000
+CDUS43 KLOT 092134
+CLIMDW
+
+CLIMATE REPORT 
+NATIONAL WEATHER SERVICE CHICAGO IL
+434 PM CDT THU JUL 09 2026
+
+...................................
+
+...THE CHICAGO-MIDWAY CLIMATE SUMMARY FOR JULY 9 2026...
+VALID TODAY AS OF 0400 PM LOCAL TIME.
+
+CLIMATE NORMAL PERIOD: 1991 TO 2020
+CLIMATE RECORD PERIOD: 1928 TO 2026
+
+
+WEATHER ITEM   OBSERVED TIME   RECORD YEAR NORMAL DEPARTURE LAST      
+                VALUE   (LST)  VALUE       VALUE  FROM      YEAR     
+                                                  NORMAL           
+...................................................................
+TEMPERATURE (F)                                                          
+ TODAY                                                               
+  MAXIMUM         87   2:34 PM 100    1936  85      2       84        
+  MINIMUM         74   5:36 AM  51    1941  68      6       70        
+  AVERAGE         81                        76      5       77     
+
+PRECIPITATION (IN)                                                    
+  TODAY            0.00          2.43 1946   0.11  -0.11      T       
+  MONTH TO DATE    3.05                      1.00   2.05     0.73     
+  SINCE JUN 1     10.39                      5.01   5.38     6.10     
+  SINCE JAN 1     24.28                     17.49   6.79    15.67     
+
+DEGREE DAYS                                                           
+ HEATING                                                              
+  TODAY            0                         0      0        0        
+  MONTH TO DATE    0                         0      0        0        
+  SINCE JUN 1      3                        24    -21        9        
+  SINCE JUL 1      0                         0      0        0        
+
+ COOLING                                                              
+  TODAY           16                        11      5       12        
+  MONTH TO DATE  124                        98     26      138        
+  SINCE JUN 1    317                       320     -3      462        
+  SINCE JAN 1    401                       402     -1      513        
+...................................................................
+
+
+WIND (MPH)                                                            
+  HIGHEST WIND SPEED    15   HIGHEST WIND DIRECTION    SW (240)       
+  HIGHEST GUST SPEED    21   HIGHEST GUST DIRECTION    SW (230)       
+  AVERAGE WIND SPEED     8.4                                        
+
+
+SKY COVER                                                             
+  AVERAGE SKY COVER 0.8                                                 
+
+
+WEATHER CONDITIONS                                                    
+THE FOLLOWING WEATHER WAS RECORDED TODAY.                             
+  NO SIGNIFICANT WEATHER WAS OBSERVED.                                  
+
+
+RELATIVE HUMIDITY (PERCENT)
+ HIGHEST    85           5:00 AM                                      
+ LOWEST     61           1:00 PM                                      
+ AVERAGE    73                                                        
+
+..........................................................
+
+
+THE CHICAGO-MIDWAY CLIMATE NORMALS FOR TOMORROW
+                         NORMAL    RECORD    YEAR                     
+ MAXIMUM TEMPERATURE (F)   85       106      1936                      
+ MINIMUM TEMPERATURE (F)   68        51      1941                      
+
+
+SUNRISE AND SUNSET                                                    
+JULY  9 2026..........SUNRISE   5:25 AM CDT   SUNSET   8:27 PM CDT     
+JULY 10 2026..........SUNRISE   5:26 AM CDT   SUNSET   8:27 PM CDT     
+
+
+-  INDICATES NEGATIVE NUMBERS.
+R  INDICATES RECORD WAS SET OR TIED.
+MM INDICATES DATA IS MISSING.
+T  INDICATES TRACE AMOUNT.
+
+
+
+
+$$
