@@ -10,6 +10,12 @@
 #
 # lat/lon are the settlement station's own coordinates (so the gridpoint forecast covers the
 # spot the contract actually resolves at), to <=4 decimal places as the NWS API requires.
+#
+# kalshi_series tickers are the ACTIVE daily-high series, verified live (2026-07-11) by
+# querying /trade-api/v2/markets?series_ticker=X&status=open — Kalshi lists retired
+# duplicates for several cities (KXDENHIGH, KXHIGHTEMPDEN, HIGHMIA all have 0 open
+# markets), so never guess these from the series listing alone. `variable` is the
+# climate_reports variable the series settles on.
 
 stations:
   - station_id: nyc
@@ -19,6 +25,9 @@ stations:
     obs_station_id: KNYC
     cli_site_name: "CENTRAL PARK"
     timezone: America/New_York
+    kalshi_series:
+      - ticker: KXHIGHNY
+        variable: max_temp
 
   - station_id: chi
     display_name: "Chicago (Midway)"
@@ -27,6 +36,9 @@ stations:
     obs_station_id: KMDW
     cli_site_name: "CHICAGO-MIDWAY"
     timezone: America/Chicago
+    kalshi_series:
+      - ticker: KXHIGHCHI
+        variable: max_temp
 
   - station_id: aus
     display_name: "Austin (Bergstrom Intl)"
@@ -35,6 +47,9 @@ stations:
     obs_station_id: KAUS
     cli_site_name: "AUSTIN BERGSTROM"
     timezone: America/Chicago
+    kalshi_series:
+      - ticker: KXHIGHAUS
+        variable: max_temp
 
   - station_id: den
     display_name: "Denver (Intl Airport)"
@@ -43,6 +58,9 @@ stations:
     obs_station_id: KDEN
     cli_site_name: "DENVER"
     timezone: America/Denver
+    kalshi_series:
+      - ticker: KXHIGHDEN
+        variable: max_temp
 
   - station_id: mia
     display_name: "Miami (Intl Airport)"
@@ -51,6 +69,9 @@ stations:
     obs_station_id: KMIA
     cli_site_name: "MIAMI"
     timezone: America/New_York
+    kalshi_series:
+      - ticker: KXHIGHMIA
+        variable: max_temp
 
   - station_id: phl
     display_name: "Philadelphia (Intl Airport)"
@@ -59,3 +80,6 @@ stations:
     obs_station_id: KPHL
     cli_site_name: "PHILADELPHIA"
     timezone: America/New_York
+    kalshi_series:
+      - ticker: KXHIGHPHIL
+        variable: max_temp

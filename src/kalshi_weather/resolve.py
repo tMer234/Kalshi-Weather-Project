@@ -109,12 +109,45 @@ def ensure_stations_resolved(
     stations: list[StationConfig],
     force: bool = False,
 ) -> list[dict]:
-    """Resolve any configured station missing from the stations table (all, if force)."""
+    """Resolve any configured station missing from the stations table (all, if force).
+
+    A station that exists only as a stub (grid URL still NULL, e.g. created by a
+    backfill on a fresh database) counts as missing and gets fully resolved.
+    """
     existing = {
-        row[0] for row in conn.execute("SELECT station_id FROM stations").fetchall()
+        row[0]
+        for row in conn.execute(
+            "SELECT station_id FROM stations WHERE forecast_grid_data_url IS NOT NULL"
+        ).fetchall()
     }
     resolved = []
     for cfg in stations:
         if force or cfg.station_id not in existing:
             resolved.append(resolve_station(client, conn, cfg))
     return resolved
+
+
+def ensure_station_stubs(
+    conn: duckdb.DuckDBPyConnection, stations: list[StationConfig]
+) -> None:
+    """Insert config-known station rows without touching the NWS API, so collectors
+    that don't need grid metadata (backfills, the Kalshi collector) can satisfy the
+    stations foreign key on a fresh database. Existing rows are left untouched; the
+    next live NWS run upgrades stubs to fully resolved rows."""
+    for cfg in stations:
+        conn.execute(
+            "INSERT INTO stations (station_id, display_name, lat, lon, obs_station_id, "
+            "cli_location_id, cli_site_name, timezone, station_verified) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (station_id) DO NOTHING",
+            [
+                cfg.station_id,
+                cfg.display_name,
+                cfg.lat,
+                cfg.lon,
+                cfg.obs_station_id,
+                cfg.effective_cli_location_id,
+                cfg.cli_site_name,
+                cfg.timezone,
+                cfg.obs_station_id is not None,
+            ],
+        )

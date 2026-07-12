@@ -46,25 +46,29 @@ CLI_PRODUCTS_PER_RUN = 15
 _GRID_UPSERT = """
 INSERT INTO grid_forecasts (
     station_id, variable, issued_time, valid_start, valid_end,
-    horizon_hours, value, unit, pulled_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    horizon_hours, value, unit, pulled_at, source
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (station_id, variable, issued_time, valid_start) DO NOTHING
 """
 
 # update-on-newer-issuance: a corrected/re-issued CLI product overwrites the stored value,
-# but a stale re-fetch can never regress a newer correction
-_CLIMATE_UPSERT = """
+# but a stale re-fetch can never regress a newer correction. Shared with the IEM backfill
+# (nws_backfill.py), which passes source='iem_afos' — the guard also means live-API rows
+# beat backfill rows whenever both exist for a date, since finals outrank intermediates
+# purely by issued_time.
+CLIMATE_UPSERT = """
 INSERT INTO climate_reports (
     station_id, obs_date, variable, value, value_time, unit,
-    product_id, issued_time, pulled_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    product_id, issued_time, pulled_at, source
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (station_id, obs_date, variable) DO UPDATE SET
     value = excluded.value,
     value_time = excluded.value_time,
     unit = excluded.unit,
     product_id = excluded.product_id,
     issued_time = excluded.issued_time,
-    pulled_at = excluded.pulled_at
+    pulled_at = excluded.pulled_at,
+    source = excluded.source
 WHERE excluded.issued_time > climate_reports.issued_time
 """
 
@@ -177,6 +181,7 @@ def ingest_grid_forecasts(
                     float(entry["value"]),
                     unit,
                     pulled_at,
+                    "nws_api",
                 )
             )
 
@@ -245,12 +250,13 @@ def ingest_climate_reports(
                     listing["id"],
                     issued,
                     pulled_at,
+                    "nws_api",
                 )
             )
         _mark_fetched(conn, client.base_url + product_url, None)
 
     if rows:
-        conn.executemany(_CLIMATE_UPSERT, rows)
+        conn.executemany(CLIMATE_UPSERT, rows)
     result.rows_upserted = len(rows)
     if parse_failures:
         result.error = f"{parse_failures} CLI product(s) failed to parse (see logs)"

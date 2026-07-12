@@ -1,7 +1,7 @@
 #!/usr/bin/env python
-"""Cron-compatible shim for `kalshi-weather ingest nws` — same options, same behavior.
+"""Cron-compatible shim for `kalshi-weather ingest kalshi` — same options, same behavior.
 
-    .venv/bin/python scripts/run_ingest.py [--metar] [--metar-days 7] [--db PATH]
+    .venv/bin/python scripts/run_kalshi_ingest.py [--db PATH]
 
 Canonical implementation: kalshi_weather/cli.py. Full operating guide: docs/runbook.md.
 """
@@ -12,10 +12,10 @@ import sys
 
 import typer
 
-from kalshi_weather.cli import ingest_nws
+from kalshi_weather.cli import ingest_kalshi
 
 app = typer.Typer(add_completion=False)
-app.command()(ingest_nws)
+app.command()(ingest_kalshi)
 
 if __name__ == "__main__":
     sys.exit(app())

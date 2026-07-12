@@ -27,8 +27,11 @@ analysis mistake comes from blurring them:
 leading up to the report. It is **never** settlement truth — the CLI report can and does
 differ from what you'd compute off raw METAR.
 
-Kalshi's own market data (prices, settlements) is out of scope for this pipeline and will
-live elsewhere.
+Since Phase 0b there is a third plane: **Kalshi market data** (`markets`,
+`market_snapshots`, `market_outcomes`) — what the market *believed* (quote history) and
+how Kalshi *actually settled* each contract (§11). Its collector
+(`scripts/run_kalshi_ingest.py`) is independent of the NWS one; either can run without
+the other.
 
 ---
 
@@ -90,6 +93,7 @@ human-readable forecast. One row per `(station_id, variable, issued_time, valid_
 | `value` | numeric forecast value; interpretation depends on the variable class (§4.3) |
 | `unit` | WMO unit with `wmoUnit:` stripped: `degC`, `percent`, `mm`, `km_h-1` (= km/h) **(observed)** |
 | `pulled_at` | when our collector fetched it (UTC) |
+| `source` | provenance: always `'nws_api'` today; reserved for a future NDFD-archive forecast backfill (see runbook §2.1) |
 
 ### 4.2 Why intervals span multiple hours: run-length encoding
 
@@ -212,9 +216,10 @@ best-known** value is kept.
 | `value` | numeric value as printed (see §5.5 for `T`/`MM` handling) |
 | `value_time` | time-of-day the max/min occurred, **naive station-local**, only for temps (§5.4) |
 | `unit` | as printed in the report: `degF` for temps, `in` for precip/snow **(observed)** — imperial, unlike forecasts |
-| `product_id` | NWS product id this row was parsed from — fetch `https://api.weather.gov/products/{product_id}` to see the raw bulletin |
-| `issued_time` | the product's `issuanceTime` (UTC) — drives the revision logic (§5.2) |
+| `product_id` | product id this row was parsed from. For `source='nws_api'`: fetch `https://api.weather.gov/products/{product_id}` to see the raw bulletin. For `source='iem_afos'`: an IEM id like `202607100625-KOKX-CDUS41-CLINYC` — fetch `https://mesonet.agron.iastate.edu/api/1/nwstext/{product_id}` |
+| `issued_time` | the product's issuance time (UTC) — drives the revision logic (§5.2) |
 | `pulled_at` | fetch time (UTC) |
+| `source` | provenance: `'nws_api'` (live collector) or `'iem_afos'` (historical backfill, runbook §2.1). Both go through the same parser and upsert guard, so a backfill can never regress a live value |
 
 ### 5.2 Report lifecycle: intermediate → final → corrections
 
@@ -367,7 +372,8 @@ Only populated when ingest runs with `--metar`. One row per
 ## 9. `ingest_runs` — audit trail / monitoring
 
 One row per (station, endpoint) per collector invocation. `endpoint` ∈ `grid_forecasts`,
-`climate_reports`, `observations`.
+`climate_reports`, `observations`, plus the Kalshi collector's per-series endpoints
+`kalshi_markets:{SERIES}` and `kalshi_outcomes:{SERIES}` (e.g. `kalshi_markets:KXHIGHNY`).
 
 - `http_status`: 200 normal, **304 = "nothing changed" (healthy no-op, not an error)**,
   NULL when the failure happened before/without an HTTP status.
@@ -404,7 +410,125 @@ re-parsed identical products.)
 
 ---
 
-## 11. Gotchas checklist (the short version)
+## 11. Kalshi market data — `markets`, `market_snapshots`, `market_outcomes`
+
+Collected by `scripts/run_kalshi_ingest.py` from Kalshi's **public** trade-api/v2 (no API
+key; market data is unauthenticated). Which series are collected is configured per station
+in `config/stations.yaml` under `kalshi_series`; the six active daily-high series
+(`KXHIGHNY`, `KXHIGHCHI`, `KXHIGHAUS`, `KXHIGHDEN`, `KXHIGHMIA`, `KXHIGHPHIL`) were
+verified live on 2026-07-11 — Kalshi's series listing also contains **retired duplicates**
+(`KXDENHIGH`, `KXHIGHTEMPDEN`, `HIGHMIA`, ...) with zero open markets, so never pick
+series tickers from the listing alone; check for open markets.
+
+### 11.1 `markets` — contract definitions (update-in-place)
+
+One row per contract ticker (e.g. `KXHIGHNY-26JUL12-T89`). Strikes/title never change
+after listing; `status`, `close_time`, `expected_expiration_time`, `updated_at` are
+refreshed on every pass.
+
+| column | meaning |
+|---|---|
+| `ticker` | Kalshi market ticker — PK |
+| `event_ticker` | groups the strike ladder for one (station, day), e.g. `KXHIGHNY-26JUL12` |
+| `series_ticker` | e.g. `KXHIGHNY` |
+| `station_id`, `variable` | our config mapping to the settlement join: `climate_reports(station_id, obs_date, variable)` |
+| `obs_date` | the contract's observation day, parsed from the event-ticker date suffix (`26JUL12` → 2026-07-12) |
+| `strike_type`, `floor_strike`, `cap_strike` | payout criterion — see §11.4, the most important table in this section |
+| `subtitle` | Kalshi's human-readable band (`"88° to 89°"`) — display only, never parse it |
+| `open_time`, `close_time` | UTC. Close is ~11:59 PM ET on `obs_date` (04:59Z next day during EDT) |
+| `expected_expiration_time` | UTC. Per current market rules: "the first 7:00 or 8:00 AM ET following the release of the data" — i.e. the morning after the CLI final lands |
+| `status` | latest seen: `active` → `closed` → `settled`/`finalized` **(observed: listings show open markets as `active`, though the query param is `open`)** |
+
+### 11.2 `market_snapshots` — quote history (append-only)
+
+One row per open market per collector pass; `snapshot_time` is shared across the whole
+pass so a pass's snapshots join to each other and to `grid_forecasts` vintages cleanly.
+The cron cadence IS the quote-history resolution (target: every 5–15 min while open).
+
+- **All prices are dollars per $1 contract** (parsed from the API's `*_dollars` string
+  fields), so `yes_bid`/`yes_ask` ∈ [0, 1] read directly as probabilities: mid =
+  `(yes_bid + yes_ask)/2` is the market-implied P(YES) before any spread/bias adjustment.
+- `yes_bid_size`/`yes_ask_size` are **contracts displayed at the best level only** (from
+  `*_size_fp`) — not book depth. Full order-book depth collection is a Phase 8 add-on.
+- `volume` is lifetime contracts traded; `volume_24h` trailing 24h; `open_interest`
+  outstanding contracts; `liquidity` is Kalshi's dollar-value-resting-on-book metric.
+- Contracts can trade fractionally (the `_fp` fields carry decimals like `1642.25`).
+
+### 11.2b `market_candles` — historical price bars (backfill counterpart to snapshots)
+
+`market_snapshots` only exists from when the live collector started running; for any
+earlier market, `kalshi-weather backfill kalshi` reconstructs price history from Kalshi's
+candlesticks endpoint into this table. One row per `(ticker, period_minutes, period_end)`.
+
+| column | meaning |
+|---|---|
+| `period_end` | UTC end of the bar (the API's `end_period_ts`); the bar covers the `period_minutes` before it |
+| `period_minutes` | bar length: 1, 60 (default), or 1440 |
+| `price_open/high/low/close/mean` | **trade** prices within the bar, dollars ∈ [0,1] ≈ probability. NULL when nothing traded in the bar |
+| `yes_bid_close`, `yes_ask_close` | best quotes at bar end — present even in bars with no trades; `(bid+ask)/2` is the market-implied probability at `period_end` |
+| `volume` | contracts traded within the bar (fractional allowed) |
+| `open_interest` | outstanding contracts at bar end |
+
+Snapshot-vs-candle choice for analysis: prefer `market_snapshots` where it exists
+(higher resolution, includes displayed size); fall back to candles for history. The two
+agree on convention (dollars, UTC) by construction.
+
+### 11.3 `market_outcomes` — Kalshi's own settlement (insert-once)
+
+One row per settled contract. **Insert-once by design**: a finalized result must never
+change, so a conflicting later listing is silently ignored rather than applied — if you
+ever suspect a re-settlement, that's a manual investigation, not an upsert.
+
+- `result` ∈ `yes` | `no`.
+- `expiration_value` — the underlying (°F) Kalshi settled against, **as of expiration**.
+  This is the market-P&L ground truth. It can legitimately differ from
+  `climate_reports.value` because the contract ignores NWS revisions issued *after*
+  expiration, while `climate_reports` keeps the current-best value forever. Verified
+  2026-07-11: 12/12 station-days agreed exactly; expect rare post-expiration-correction
+  divergences, not systematic ones.
+
+### 11.4 Payout criterion semantics (verified against live markets + the NHIGH CFTC filing)
+
+| `strike_type` | YES iff | example (live, 2026-07-12 NYC) |
+|---|---|---|
+| `greater` | `value > floor_strike` — **strict** | floor 89, subtitle "90° or above" |
+| `less` | `value < cap_strike` — **strict** | cap 82, subtitle "81° or below" |
+| `between` | `floor_strike <= value <= cap_strike` — **inclusive both ends** | floor 88, cap 89, "88° to 89°" |
+
+Settlement values are integer °F, so `greater` with floor 89 ⇔ "≥ 90". **The ticker's
+`-T`/`-B` suffix does NOT encode the side** — a `-T87` ticker was observed as the *less*
+tail on one day and tickers encode the tail threshold differently across days; only
+`strike_type` + strikes are authoritative.
+
+Settlement source, per the NHIGH terms and every market's `rules_primary`: the NWS
+Climatological Report (Daily) — exactly what `climate_reports` parses. Revisions between
+close and expiration count; revisions after expiration don't.
+
+### 11.5 The market⇄settlement join
+
+```sql
+-- did the market's settled value match our independently parsed CLI value?
+SELECT m.station_id, m.obs_date,
+       any_value(o.expiration_value) AS kalshi_settled,
+       any_value(cr.value)           AS cli_value
+FROM market_outcomes o
+JOIN markets m USING (ticker)
+LEFT JOIN climate_reports cr
+       ON cr.station_id = m.station_id
+      AND cr.obs_date   = m.obs_date
+      AND cr.variable   = m.variable
+GROUP BY 1, 2;
+```
+
+Two gotchas inherited from §5: (a) `climate_reports` values for *today* are intermediate
+until the final lands, so never cross-check an unsettled day; (b) if the NWS collector
+has not run since a day's final report, its `climate_reports` row is stale-intermediate —
+a wildly implausible mismatch here (e.g. 65 vs 91) means "run `scripts/run_ingest.py`",
+not "parser bug" (observed exactly this on 2026-07-11).
+
+---
+
+## 12. Gotchas checklist (the short version)
 
 1. Multi-hour `grid_forecasts` windows are run-length encoding for hourly-state variables,
    totals for accumulation variables, and meaningful periods for max/min temperature.
@@ -417,3 +541,14 @@ re-parsed identical products.)
 8. Missing row ≠ zero (MM values and null forecast periods are skipped, not stored).
 9. Trace precip is stored as 0.0.
 10. Only current-best climate values are kept — no revision history.
+11. Kalshi `greater`/`less` are strict; `between` is inclusive both ends. The ticker
+    suffix does not encode the side — use `strike_type`.
+12. Kalshi prices are stored in dollars (0–1 ≈ probability), not cents.
+13. `market_outcomes.expiration_value` is settlement-as-of-expiration; it can diverge
+    from `climate_reports` after a post-expiration NWS correction.
+14. Kalshi's series listing contains retired duplicate series — verify a series has open
+    markets before adding it to `stations.yaml`.
+15. `climate_reports.source` tells you whether a row came from the live API or the IEM
+    backfill; both are the same bulletins, but `product_id` resolves at different URLs.
+16. `market_candles.price_*` is NULL in bars with no trades — use `yes_bid_close`/
+    `yes_ask_close` (always present) for a continuous implied-probability series.

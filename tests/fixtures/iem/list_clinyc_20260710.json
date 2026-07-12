@@ -1,0 +1,24 @@
+{
+ "data": [
+  {
+   "index": 0,
+   "entered": "2026-07-10T06:25:00Z",
+   "pil": "CLINYC",
+   "product_id": "202607100625-KOKX-CDUS41-CLINYC",
+   "cccc": "KOKX",
+   "count": 1,
+   "link": "https://mesonet.agron.iastate.edu/p.php?pid=202607100625-KOKX-CDUS41-CLINYC",
+   "text_link": "https://mesonet.agron.iastate.edu/api/1/nwstext/202607100625-KOKX-CDUS41-CLINYC"
+  },
+  {
+   "index": 1,
+   "entered": "2026-07-10T20:35:00Z",
+   "pil": "CLINYC",
+   "product_id": "202607102035-KOKX-CDUS41-CLINYC",
+   "cccc": "KOKX",
+   "count": 1,
+   "link": "https://mesonet.agron.iastate.edu/p.php?pid=202607102035-KOKX-CDUS41-CLINYC",
+   "text_link": "https://mesonet.agron.iastate.edu/api/1/nwstext/202607102035-KOKX-CDUS41-CLINYC"
+  }
+ ]
+}

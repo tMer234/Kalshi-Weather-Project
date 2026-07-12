@@ -14,6 +14,18 @@ DEFAULT_STATIONS_YAML = REPO_ROOT / "config" / "stations.yaml"
 
 
 @dataclass(frozen=True)
+class SeriesConfig:
+    """One Kalshi market series this station's contracts trade under.
+
+    `variable` names the climate_reports variable the series settles on ('max_temp',
+    'min_temp'), which is what lets market rows join to settlement truth later.
+    """
+
+    ticker: str
+    variable: str
+
+
+@dataclass(frozen=True)
 class StationConfig:
     station_id: str
     display_name: str
@@ -27,6 +39,8 @@ class StationConfig:
     # 3-letter location id for CLI product listing; defaults to obs_station_id minus the
     # leading 'K' (e.g. KMDW -> MDW), which holds for CONUS ICAO codes.
     cli_location_id: str | None = None
+    # Kalshi series to collect for this station; empty tuple => Kalshi collector skips it.
+    kalshi_series: tuple[SeriesConfig, ...] = ()
 
     @property
     def effective_cli_location_id(self) -> str | None:
@@ -72,6 +86,10 @@ def load_stations(path: Path = DEFAULT_STATIONS_YAML) -> list[StationConfig]:
                     obs_station_id=entry.get("obs_station_id"),
                     cli_site_name=entry.get("cli_site_name"),
                     cli_location_id=entry.get("cli_location_id"),
+                    kalshi_series=tuple(
+                        SeriesConfig(ticker=s["ticker"], variable=s["variable"])
+                        for s in entry.get("kalshi_series", [])
+                    ),
                 )
             )
         except KeyError as e:

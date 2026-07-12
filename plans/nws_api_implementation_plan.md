@@ -1,5 +1,10 @@
 # NWS Data Ingestion Pipeline — Implementation Plan
 
+> **HISTORICAL DOCUMENT — this plan is fully implemented** (commit `efba24a` and later).
+> The living plan for everything after it is `plans/master_plan.md`; operations live in
+> `docs/runbook.md`. Kept for the design reasoning; where it disagrees with the code,
+> the code and data dictionary win.
+
 ## Context
 
 This project (Kalshi weather fair-value modeling) is greenfield — the directory currently

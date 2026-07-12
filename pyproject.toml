@@ -19,6 +19,9 @@ dev = [
     "responses>=0.25",
 ]
 
+[project.scripts]
+kalshi-weather = "kalshi_weather.cli:app"
+
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
