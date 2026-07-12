@@ -43,6 +43,14 @@ GRID_VARIABLES = [
 # offices issue 1-3/day, so this covers roughly the past week)
 CLI_PRODUCTS_PER_RUN = 15
 
+# NWS gridpoint payloads carry ~7 days of forecast periods, but NHIGH markets only ever
+# open ~24h before obs_date and close ~40h after — nothing beyond ~40h out is tradeable,
+# and 72h is the outer bound the residual dataset is scoped to (docs/data_dictionary.md
+# §6.1). Storing the other ~4-5 days is pure waste: same bandwidth per pull either way
+# (NWS returns the whole payload in one JSON regardless), but unbounded DB growth for
+# rows that are structurally unusable by anything downstream.
+MAX_HORIZON_HOURS = 72
+
 _GRID_UPSERT = """
 INSERT INTO grid_forecasts (
     station_id, variable, issued_time, valid_start, valid_end,
@@ -146,7 +154,11 @@ def _count_rows(conn: duckdb.DuckDBPyConnection, station_id: str) -> int:
 def ingest_grid_forecasts(
     client: NWSClient, conn: duckdb.DuckDBPyConnection, station: dict
 ) -> RunResult:
-    """Pull the raw numeric gridpoint layers and append any new forecast vintage."""
+    """Pull the raw numeric gridpoint layers and append any new forecast vintage.
+
+    NWS returns ~7 days of periods per pull; only periods within MAX_HORIZON_HOURS are
+    stored (see its comment) — same request either way, smaller table.
+    """
     result = RunResult(station["station_id"], "grid_forecasts")
     url = station["forecast_grid_data_url"]
     resp = client.get_grid_data(url, if_modified_since=_cached_last_modified(conn, url))
@@ -170,6 +182,9 @@ def ingest_grid_forecasts(
             if entry.get("value") is None:  # NWS uses null for unavailable periods
                 continue
             valid_start, valid_end = parse_interval(entry["validTime"])
+            h = horizon_hours(issued, to_utc_naive(valid_start))
+            if h > MAX_HORIZON_HOURS:  # beyond the residual dataset's scoped horizon
+                continue
             rows.append(
                 (
                     station["station_id"],
@@ -177,7 +192,7 @@ def ingest_grid_forecasts(
                     issued,
                     to_utc_naive(valid_start),
                     to_utc_naive(valid_end),
-                    horizon_hours(issued, to_utc_naive(valid_start)),
+                    h,
                     float(entry["value"]),
                     unit,
                     pulled_at,

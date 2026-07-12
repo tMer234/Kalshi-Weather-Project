@@ -60,16 +60,21 @@ recorded in `ingest_runs`).
 
 ### Scheduling (cron)
 
-See the [runbook](docs/runbook.md) for cadence reasoning. Short version — NWS hourly;
-Kalshi every 10 minutes (its cadence IS the quote-history resolution):
+For manual/local scheduling, see the [runbook](docs/runbook.md) for cadence reasoning.
+Short version — NWS hourly; Kalshi every 10 minutes (its cadence IS the
+quote-history resolution):
 
 ```cron
 17 * * * *   cd /path/to/Kalshi_Weather_Project && .venv/bin/kalshi-weather ingest nws    >> logs/cron.log 2>&1
 */10 * * * * cd /path/to/Kalshi_Weather_Project && .venv/bin/kalshi-weather ingest kalshi >> logs/kalshi_cron.log 2>&1
 ```
 
-The commands keep no local state beyond the DuckDB file (`DUCKDB_PATH`), so they lift
-unchanged into GitHub Actions / Fly.io / Render cron.
+The commands keep no local state beyond the DuckDB file (`DUCKDB_PATH`).
+
+**Planned instead of local cron**: an always-on GitHub Actions + private GCS setup with
+per-stream cadences (quotes every 10 min, grid forecasts hourly, CLI reports and Kalshi
+resolutions twice daily) — see
+[`plans/data_automation_plan.md`](plans/data_automation_plan.md). Not yet implemented.
 
 ## Settlement stations (hardcoded, deliberately)
 

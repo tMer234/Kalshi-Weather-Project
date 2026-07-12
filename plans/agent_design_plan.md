@@ -118,6 +118,76 @@ claude plugin install duckdb-skills@claude-plugins-official
 claude plugin install context7@claude-plugins-official
 ```
 
+## 5a. Curated tooling from awesome-quant (github.com/wilsonfreitas/awesome-quant)
+
+Scanned the full list (~13 categories, hundreds of packages spanning equities, derivatives,
+and crypto quant tooling). Most of it doesn't apply: options-pricing engines, portfolio
+optimizers, and general backtesting frameworks (zipline, backtrader, vectorbt, freqtrade,
+Qlib, etc.) are all built around continuous-price OHLCV bars and long/short equity
+positions. That mismatch is exactly why `master_plan.md` Phase 8 calls for a hand-built
+simulator (`orderbook.py`, `quote_engine.py`, `fill_model.py`, `fee_model.py`) instead of
+adopting an existing backtester — this list confirms that decision rather than overturning
+it.
+
+A short list is genuinely relevant. Verified each individually rather than trusting the
+awesome-list's one-liner:
+
+**Directly on-topic — prediction-market-specific:**
+- **[pmxt](https://github.com/pmxt-dev/pmxt)** (`pip install pmxt`, MIT, ~2k stars, active —
+  v2.51.4 as of 2026-06-24) — a unified client for 15+ prediction-market venues including
+  Kalshi, styled as "the ccxt for prediction markets." Confirmed it reads Kalshi market
+  data, not just hosted trade execution. **Not a reason to replace `kalshi_client.py`** —
+  the hand-written client already passed Phase 0b with retry/backoff/pagination tuned to
+  Kalshi's actual quirks (dollar-string fields, retired duplicate series, strict-vs-inclusive
+  strike semantics — things a generic multi-venue wrapper is less likely to get exactly
+  right for Kalshi specifically). Worth knowing about as (a) a cross-check when something in
+  `kalshi_client.py` looks wrong — does pmxt parse it differently, and why — and (b) a
+  possible future path *if* the project ever adds a second venue (Polymarket), since the
+  case for a hand-written client gets weaker with each venue added.
+- **[Oracle3](https://github.com/YichengYang-Ethan/oracle3)** — an autonomous multi-venue
+  (Kalshi/Polymarket/Solana) trading agent built around a favorite-longshot-bias pricing
+  model calibrated on 291k+ resolved contracts, citing a 2026 paper (Yang) with a fitted
+  bias parameter λ̂≈0.183. This is the exact phenomenon `master_plan.md`'s Phase 0b math
+  table already names (Wolfers & Zitzewitz 2004 — "favorite-longshot bias, wealth-weighting")
+  as a reason market mid-price isn't a clean probability estimate. Worth reading as a live
+  worked example of how Phase 0b→10's bias-correction and Kelly sizing chain together end to
+  end — not something to depend on as code.
+- **[prediction-market-maker](https://github.com/octavi42/prediction-market-maker)** — a
+  market-making case study (placed #2 in Paradigm's 2026 Automated Research Hackathon)
+  covering quoting, adverse selection, inventory risk, and volatility-adjusted order sizing
+  for a binary prediction market. Structurally the closest thing in the wild to Phase 8's
+  `quote_engine.py` — worth reading before implementing the Avellaneda-Stoikov adaptation, as
+  a sanity check on the inventory-skew formula and fill assumptions.
+
+**General quant infra — narrow, specific uses:**
+- **statsmodels** — worth adding as an actual dependency *when Phase 7 starts* (not now —
+  nothing before it needs it). `statsmodels.api.Logit` gives standard errors and p-values on
+  the logistic regression coefficients for free, and
+  `statsmodels.stats.outliers_influence.variance_inflation_factor` is the direct tool for the
+  VIF multicollinearity check Phase 7's table already calls for (z-score × market-mid
+  collinearity). Hand-rolling this in scipy is more work for a worse result.
+- **empyrical-reloaded** (maintained fork of Quantopian's `empyrical`) — standard,
+  well-tested drawdown / Sharpe-like performance metrics. Phase 8/9's diagnostics (gross/net
+  P&L, drawdown, markout) can reuse these instead of hand-rolling drawdown bookkeeping, which
+  is easy to get subtly wrong (running-max vs. running-min).
+- **Kelly-Criterion** (small reference package) — not worth a dependency for a one-line
+  formula, but useful as a second implementation to differential-test `sizing.py` against
+  once Phase 10 is built, given how costly a misapplied Kelly formula can be per the plan's
+  own Thorp (2006) citation.
+- **hftbacktest** and **PyLOB** — a market-making-focused backtest engine and a minimal
+  limit-order-book implementation, respectively. Neither targets binary/discrete-settlement
+  contracts, but both are useful architecture references for `orderbook.py` (Phase 8) —
+  specifically how they structure snapshot+delta replay and queue-position tracking, which is
+  what the plan's "Level 2: queue-aware fills" target needs.
+
+**Explicitly not relevant (skip):** every options-pricing library (QuantLib, vollib, etc. —
+Black-Scholes machinery doesn't apply to threshold-settled binaries), portfolio optimizers
+(PyPortfolioOpt, Riskfolio-Lib — this project sizes single discrete bets, not a continuous
+mean-variance portfolio), the general OHLCV backtesting engines (zipline/backtrader/vectorbt/
+freqtrade/Qlib/etc. — wrong data model, as above), technical-indicator libraries (TA-Lib
+etc. — no chart-pattern signal here), and equities/crypto market-data providers (yfinance,
+Bloomberg wrappers, etc. — this project already owns its NWS/Kalshi collectors).
+
 ## 6. Knowledge baked into the system prompt
 
 Rather than making the agent re-read `README.md` + `docs/data_dictionary.md` +
@@ -246,6 +316,28 @@ Recurring correctness traps specific to this project, watch for these by reflex:
 - **Kelly sizing is aggressive by construction.** Full Kelly is not the target — the plan
   calls for fractional Kelly (¼–½) and sizing off the CI lower bound of the edge estimate,
   because the probability estimate itself is uncertain.
+
+## External references
+
+The `references/` PDFs and `master_plan.md`'s reading list are the primary math sources
+(see above). For code/architecture references, `github.com/wilsonfreitas/awesome-quant` has
+been scanned already — most of it (options pricing, portfolio optimization, general OHLCV
+backtesters) is the wrong shape for binary threshold-settled contracts and is *why* Phase 8
+is a hand-built simulator, not an adopted one. A short list is genuinely relevant and worth
+pulling up when the matching phase comes around:
+- `pmxt` (github.com/pmxt-dev/pmxt) — multi-venue prediction-market client incl. Kalshi;
+  cross-check against `kalshi_client.py`, don't replace it.
+- `Oracle3` (github.com/YichengYang-Ethan/oracle3) — worked example of favorite-longshot-bias
+  correction + Kelly sizing on live Kalshi/Polymarket data — relevant to Phase 0b's bias
+  discussion and Phase 10 sizing.
+- `prediction-market-maker` (github.com/octavi42/prediction-market-maker) — closest existing
+  worked example of Phase 8's quote-engine mechanics (inventory skew, adverse selection).
+- `statsmodels` (Phase 7: `Logit` + VIF check), `empyrical-reloaded` (Phase 8/9 diagnostics),
+  `hftbacktest`/`PyLOB` (Phase 8 `orderbook.py` architecture reference).
+
+Don't reach for a general-purpose backtesting framework (zipline, backtrader, vectorbt,
+freqtrade, Qlib) for Phase 8 — they model continuous-price long/short positions, not
+discrete binary settlement, and adopting one would fight the data model at every step.
 
 ## Working style
 

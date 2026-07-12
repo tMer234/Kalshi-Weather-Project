@@ -82,6 +82,15 @@ ingest); safe to re-resolve — NWS grid mappings occasionally change.
 Source: the **raw numeric gridpoint endpoint** (`/gridpoints/{office}/{x},{y}`), not the
 human-readable forecast. One row per `(station_id, variable, issued_time, valid_start)`.
 
+**Horizon cap, enforced at ingest (not just a query-time filter): `horizon_hours <= 72`.**
+NWS's payload carries ~7 days of periods per pull — same HTTP request either way — but
+`ingest_grid_forecasts` (`ingest.py`, `MAX_HORIZON_HOURS`) only stores periods within 72h
+of `issued_time`, matching the residual dataset's scoped horizon (§6.1) and the fact that
+NHIGH markets are never tradeable more than ~40h out anyway. **Rows collected before this
+cap existed (added 2026-07-13) may still have `horizon_hours > 72`** — old data isn't
+retroactively pruned; filter on `horizon_hours <= 72` in analysis until/unless someone
+runs a cleanup `DELETE`.
+
 ### 4.1 Columns
 
 | column | meaning |
@@ -328,6 +337,49 @@ Two caveats, both deliberate and worth re-reading:
    forecast window "saw". Rare, but it is real model error you'll observe in residuals —
    not a data bug.
 
+### 6.1 The scoped predictor set (not every vintage is a valid predictor)
+
+The join above pulls **every** forecast vintage ever collected for a day — useful for
+exploring the raw data, but NOT what Phase 0c's `residuals` table (or any model) should
+train on. Scoped 2026-07-12, grounded in real data from this database:
+
+- **Max horizon: 72h.** NHIGH markets only open ~24h before `obs_date` and close ~39–41h
+  after opening (verified against real `markets` rows) — nothing forecast more than ~40h
+  out is ever live-tradeable. 72h is kept rather than capping at 40h because NWP skill
+  growth roughly saturates by day 3–4, so the extra buckets still add curve-fitting
+  leverage for σ(h) and trend/momentum features (Phase 7) without much backfill cost;
+  beyond 72h, both benefits flatten out while backfill cost keeps climbing. **As of
+  2026-07-13 this upper bound is enforced at ingest** (§4), so new rows never exceed it —
+  the `BETWEEN -6 AND 72` filter below is still needed for the *lower* (same-day) bound
+  and for pre-2026-07-13 rows, but the `<= 72` half is now redundant for fresh data.
+- **Same-day cutoff:** exclude `maxTemperature` forecasts issued after 17:00
+  station-local on `obs_date` itself (`horizon_hours < -6`, i.e. issued more than 6h
+  after the 8 AM–9 PM window opened). The daily high occurs on average at 13.8–15.2h
+  local across all 6 stations (tail observed to 16:08, Denver) — a forecast issued later
+  is nowcasting an already-occurred peak, not predicting one, and left in would dilute
+  the 0–6h bucket's σ with near-zero-uncertainty rows.
+
+```sql
+-- the SCOPED predictor set: max 72h horizon, same-day nowcasts excluded
+SELECT gf.issued_time, gf.horizon_hours,
+       gf.value * 9/5 + 32           AS forecast_high_f,
+       cr.value                      AS settled_high_f,
+       gf.value * 9/5 + 32 - cr.value AS error_f
+FROM grid_forecasts gf
+JOIN climate_reports cr
+  ON cr.station_id = gf.station_id
+ AND cr.variable = 'max_temp'
+ AND cr.obs_date = CAST(gf.valid_start AT TIME ZONE 'UTC'
+                        AT TIME ZONE 'America/New_York' AS DATE)
+WHERE gf.station_id = 'nyc' AND gf.variable = 'maxTemperature'
+  AND gf.horizon_hours BETWEEN -6 AND 72
+ORDER BY cr.obs_date, gf.horizon_hours DESC;
+```
+
+`minTemperature` needs its own cutoff derived the same way (its `value_time` distribution
+peaks overnight/early morning, not mid-afternoon) — don't reuse the 17:00 figure for it
+without checking `climate_reports.value_time` for `min_temp` first.
+
 ---
 
 ## 7. Unit reference
@@ -552,3 +604,6 @@ not "parser bug" (observed exactly this on 2026-07-11).
     backfill; both are the same bulletins, but `product_id` resolves at different URLs.
 16. `market_candles.price_*` is NULL in bars with no trades — use `yes_bid_close`/
     `yes_ask_close` (always present) for a continuous implied-probability series.
+17. `grid_forecasts.horizon_hours` is capped at 72 for rows collected after 2026-07-13
+    (§4) — older rows may still exceed it; don't assume every row is in-bounds without
+    checking, especially on data collected before that date.

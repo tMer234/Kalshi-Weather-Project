@@ -188,6 +188,35 @@ def test_new_forecast_vintage_appends_new_rows(settings, conn):
 
 
 @responses.activate
+def test_forecast_periods_beyond_max_horizon_are_not_stored(settings, conn):
+    LOGGER.info("Starting horizon cap test")
+    payload = _points_payload()
+    grid = _grid_payload()
+    # grid's updateTime (issued) is 2026-07-09T19:03:33+00:00
+
+    # inject one period well beyond 72h and one just past the boundary, on top of the
+    # fixture's existing periods (all <=~65h)
+    far_period = {"validTime": "2026-07-16T12:00:00+00:00/PT13H", "value": 30.0}  # ~161h out
+    boundary_period = {"validTime": "2026-07-12T20:00:00+00:00/PT1H", "value": 29.0}  # ~73h out
+    grid["properties"]["maxTemperature"]["values"] += [far_period, boundary_period]
+
+    LOGGER.debug("Mocking NWS points/grid endpoints with periods beyond MAX_HORIZON_HOURS")
+    responses.get(f"{BASE}/points/40.7789,-73.9692", json=payload)
+    responses.get(payload["properties"]["forecastGridData"], json=grid)
+    _register_cli([("prod-1", "2026-07-09T06:26:00+00:00", _cli_text())])
+
+    assert run_ingest(settings, conn) == 0
+
+    max_horizon = conn.execute("SELECT max(horizon_hours) FROM grid_forecasts").fetchone()[0]
+    assert max_horizon <= 72, f"stored a period beyond the 72h cap: {max_horizon}"
+    injected = conn.execute(
+        "SELECT count(*) FROM grid_forecasts WHERE variable = 'maxTemperature' "
+        "AND valid_start IN (TIMESTAMP '2026-07-16 12:00:00', TIMESTAMP '2026-07-12 20:00:00')"
+    ).fetchone()[0]
+    assert injected == 0, "both injected out-of-window periods must be dropped, not just the far one"
+
+
+@responses.activate
 def test_corrected_cli_report_updates_in_place(settings, conn):
     LOGGER.info("Starting CLI correction update test")
     _register_points_and_grid()

@@ -4,6 +4,13 @@ How to run, schedule, monitor, and backfill every collector in this repo. For wh
 *data means*, read [`data_dictionary.md`](data_dictionary.md); this document is about
 *operating* the pipelines.
 
+**Scheduling is moving off this laptop.** The manual/local instructions below (§1.3)
+remain accurate for running things by hand, but the planned always-on setup — GitHub
+Actions workflows + a private GCS bucket holding the canonical database, with the
+`ingest nws`/`ingest kalshi` commands split into narrower cadence-specific subcommands
+— is designed in [`plans/data_automation_plan.md`](../plans/data_automation_plan.md).
+Not yet implemented; this section will be rewritten to point at it once it is.
+
 Everything is driven by one installed command, **`kalshi-weather`** (registered by
 `pip install -e .`; re-run that after pulling a version that changes `pyproject.toml`):
 
@@ -38,6 +45,12 @@ One idempotent pass over all configured stations: gridpoint forecast vintages
 (append-only) + CLI climate reports (update-on-newer-issuance). Unchanged forecasts
 short-circuit to HTTP 304; already-seen CLI products are skipped. Options: `--metar`
 (also pull raw METAR, secondary signal), `--metar-days N`.
+
+- **Horizon cap:** NWS returns ~7 days of periods per pull (same request regardless), but
+  only periods within 72h of `issued_time` are stored (`MAX_HORIZON_HOURS` in
+  `ingest.py`) — matches the residual dataset's scoped horizon (data dictionary §6.1);
+  nothing further out is ever live-tradeable or backfill-relevant. Added 2026-07-13; rows
+  collected before that may still exceed 72h and aren't retroactively pruned.
 
 - **Cadence**: hourly. NWS re-issues gridpoint forecasts roughly hourly; CLI finals land
   early morning local time (~1–3 AM), intermediates during the day.
@@ -109,6 +122,14 @@ kalshi-weather backfill nws-cli --start 2026-06-01 --end 2026-06-30 --station ny
   heavier build documented as open work in the master plan (Phase 0c). Until then,
   residual-model history is bounded by when live forecast collection started
   (2026-07-09).
+  - **Scope if/when built** (decided 2026-07-12, see data dictionary §6.1): only the
+    72h-max, same-day-excluded predictor window is needed, not the full ~168h NDFD
+    archive horizon — cuts the download volume roughly 55–60% versus a naive full-week
+    pull. NCEI's archive stores hourly instantaneous 2m temperature grids (not a
+    precomputed daily max/min layer), so max/min would need deriving from those and
+    validating against live-API values on overlap days before trusting it — this
+    validation step, not GRIB tooling (verified: `pygrib` installs cleanly, no system
+    deps), is the real risk in that build.
 
 ### 2.2 `kalshi-weather backfill kalshi` — historical markets + prices
 

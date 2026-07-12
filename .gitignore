@@ -18,5 +18,6 @@ venv/
 
 # data & logs
 data/
+plans/
 logs/
 *.duckdb

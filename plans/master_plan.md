@@ -88,6 +88,9 @@ mirroring the existing NWS patterns: `nws_client.py`'s retry/conditional-GET sty
    *(As built: strikes come structured from the API — floor_strike/cap_strike/strike_type —
    only obs_date is parsed, from the event ticker.)*
 3. Cron it alongside `run_ingest.py`; snapshot cadence ~5–15 min while markets are open.
+   *(Superseded: scheduling is now planned via GitHub Actions + a private GCS bucket,
+   not local cron, with quotes/resolutions/grid/CLI reports each on their own cadence —
+   see `plans/data_automation_plan.md`.)*
 4. Idempotency test in the style of `tests/test_ingest_upsert.py`.
 
 **Math/stats & sources:**
@@ -110,6 +113,33 @@ horizon bucket (0–6h, 6–24h, 24–48h, 48–72h per [MathDoc] §2.1). The jo
 conversion, and window caveats are already worked out and tested in
 `docs/data_dictionary.md` §6 — use that SQL as the starting point, including its two
 gotchas (degC vs degF; forecast max window 8AM–9PM ≠ settlement day 1AM–12:59AM).
+
+> **SCOPED 2026-07-12 (was previously undefined — the §6 join example pulls every vintage
+> ever collected, unbounded):**
+> - **Max horizon: 72h.** Confirmed live that NHIGH markets only open ~24h before
+>   `obs_date` and close ~39–41h after opening — so nothing beyond ~40h out is ever
+>   live-tradeable. 72h is kept anyway (not capped at 40h) because it matches the
+>   existing 4-bucket scheme and gives real value beyond direct trading: (a) curve-fitting
+>   leverage if σ(h) is ever fit as a smooth function rather than discrete per-bucket
+>   values — borrowing strength from 40–72h stabilizes the curve near 24–40h while data
+>   is still sparse; (b) trend/momentum features for Phase 7's already-planned "recent
+>   NWS bias (rolling residual mean)" — e.g. how the forecast moved from 3 days out to
+>   now. NWP skill growth roughly saturates by day 3–4 (the plan's own cited MAE curve
+>   flattens there), so days 4–7 were judged to add backfill cost without adding
+>   modeling value for either use case — excluded. **Enforced at ingest as of
+>   2026-07-13** (`ingest.py`'s `MAX_HORIZON_HOURS`) — the live collector no longer
+>   stores periods beyond 72h at all (same NWS request either way; just unused rows
+>   before). Pre-existing rows beyond 72h are being cleared manually, not backfilled.
+> - **Same-day cutoff: exclude maxTemperature forecasts issued after 17:00 station-local
+>   on `obs_date`** (concretely: `horizon_hours < -6` relative to the 8AM–9PM window).
+>   Grounded in real `value_time` data: the daily high occurs on average at 13.8–15.2h
+>   local across all 6 stations, tail observed to 16:08 (Denver). Forecasts issued later
+>   than that are, on average, nowcasting an already-occurred peak, not predicting one —
+>   left in, they'd dilute the 0–6h bucket's σ with near-zero-uncertainty rows that don't
+>   represent genuine forecast skill.
+> - This directly scopes the NDFD backfill (see Phase 0c backfill status below): 72h of
+>   forecast history per obs_date, not the full ~168h(7-day) horizon NDFD archives —
+>   roughly a 55–60% cut in that backfill's download volume.
 
 **Bootstrap history (decision embedded in plan):** live collection started ~2026-07-09, so
 organic accumulation gives only ~180 residuals/station/6-months. To fit σ per
