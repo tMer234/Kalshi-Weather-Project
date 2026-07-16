@@ -17,9 +17,10 @@ append-only with `issued_time`/`valid_start`/`horizon_hours`) and settlement gro
 > **Update 2026-07-11**: Phase 0b (Kalshi collector) is also built and verified, plus a
 > unified `kalshi-weather` CLI and the Phase 0c backfill tooling (IEM climate reports;
 > Kalshi settled history + candlesticks). See the STATUS notes in Phases 0b/0c and
-> `docs/runbook.md` for operations. Still pending: cron scheduling, running the actual
-> backfills, and the NDFD forecast-archive backfill (unbuilt, now the binding data
-> constraint).
+> `docs/runbook.md` for operations. **Update 2026-07-12**: the NDFD forecast-archive
+> backfill (`backfill nws-grid`) is now also built — see the STATUS note below. Still
+> pending: cron scheduling and actually running the backfills (all three commands
+> exist; none have been run against real data yet in this repo's history).
 
 **What remains** (this plan): the Kalshi market-data collector (Stage 0's other half), the
 residual dataset, the M2 probability models (Gaussian → empirical → logistic), the
@@ -156,12 +157,49 @@ phase order doesn't change, only the calendar.
 > - `kalshi-weather backfill kalshi` — historical **settled markets + outcomes** plus
 >   **candlestick price bars** (`market_candles` table) reconstructing pre-collector
 >   quote history.
-> - **NOT built: the NDFD forecast-vintage backfill** (GRIB2 archive at NCEI; heavy —
->   needs grib tooling and grid-point extraction). Until it exists, `grid_forecasts`
->   history starts 2026-07-09 and the residual dataset is bounded by it. This is now the
->   single binding constraint on Phase 1's σ fitting; decide build-vs-wait when Phase 0c
->   starts. No backfills have been RUN yet — tooling is tested but the historical pulls
->   themselves are pending a user decision on date range.
+> - **Built 2026-07-12: `kalshi-weather backfill nws-grid`** — the NDFD forecast-vintage
+>   backfill (GRIB2 archive via `pygrib`, optional `ndfd` extra). Rows land
+>   `source='ndfd_archive'` through the same conflict-safe upsert as the live
+>   collector. Implementation + full validation findings: `docs/runbook.md` §2.1. This
+>   was the single binding constraint on Phase 1's σ fitting (`grid_forecasts` history
+>   otherwise starting 2026-07-09) — now resolved as a build. **No backfills of any
+>   kind have been RUN against real data yet** in this repo's history; that's the
+>   remaining step before Phase 1 can start.
+>   **Source verified 2026-07-12** (corrects an earlier wrong assumption that only
+>   derived, hourly-instantaneous temp was archived): the public S3 bucket
+>   `noaa-ndfd-pds` archives **native per-element GRIB2 products for all 11
+>   `GRID_VARIABLES`** (`maxt`, `mint`, `temp`, `td`, `rhm`, `wspd`, `wgust`, `sky`,
+>   `qpf`, `pop12`, `snow`), timestamped per issuance (real vintages, not a daily
+>   snapshot), back to 2020-04-16 — see `docs/runbook.md` §2.1 for the full finding.
+>   This meaningfully de-risks the build (no need to derive max/min from raw hourly
+>   grids).
+>   **Validation spike done (2026-07-12)**, diffed real archive files against
+>   already-collected live `grid_forecasts` rows across all 6 stations: sector
+>   extraction resolved (CONUS = region code `UZ`, `*UZ98` = full-res day-1–3, plain
+>   nearest-gridcell lookup, no reverse-projection math). Accuracy verdict, 9 of 11
+>   variables: `maxTemperature`/`minTemperature`/`temperature`/`dewpoint`/
+>   `quantitativePrecipitation` match essentially exactly (mean abs diff ≤0.14°F /
+>   0.001mm); `windSpeed`/`windGust`/`relativeHumidity`/`skyCover` are close with
+>   small explainable noise (live rounds wind to whole knots; RH/sky are spatially
+>   sharp so nearest-gridcell selection adds minor variance) — safe to backfill, not
+>   bit-exact. **`probabilityOfPrecipitation`: root cause found, accepted as coarser**
+>   (2026-07-12) — live PoP's real native cadence is 3-hourly near-term / 6-hourly
+>   further out; NDFD's archived `pop12` is a genuine, coarser 12-hour product (no
+>   finer NDFD PoP variant exists in this archive). **Decided: backfill PoP at 12h
+>   resolution anyway** — acceptable since PoP isn't a model feature until a much
+>   later phase, so resolution parity with live rows isn't load-bearing yet; flag
+>   backfilled PoP rows as 12h-resolution if/when PoP becomes a feature.
+>   **`snowfallAmount`: very likely correct, still empirically unconfirmed** — NWS's
+>   own API docs define `quantitativePrecipitation` as the liquid-equivalent field
+>   (including melted snow/ice), implying `snowfallAmount` is the separate actual-
+>   new-snow field, not a second liquid-equivalent measure; this matches the
+>   archive's `snow` element, confirmed via raw GRIB2 keys as the standard WMO
+>   "Total Snowfall" parameter (not a local-table mislabel) — likely the same
+>   quantity as live, differing only by units (m→mm). This **corrects** the data
+>   dictionary's earlier unverified "liquid-equivalent-style" guess for
+>   `snowfallAmount` (§4.4). No snow fell in the July validation window, so the
+>   magnitude is still empirically unconfirmed — needs a winter overlap day before
+>   fully trusting it. Full breakdown: `docs/runbook.md` §2.1.
 
 **Math/stats & sources:**
 | Concept | Source |

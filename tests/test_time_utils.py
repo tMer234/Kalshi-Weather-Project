@@ -1,3 +1,8 @@
+"""Pure date/time-math tests: NWS's start/duration `validTime` interval format, horizon
+arithmetic, and the naive-UTC storage convention every table relies on. No I/O, no
+fixtures — these are the building blocks the ingest-layer tests build on top of.
+"""
+
 from datetime import datetime, timedelta, timezone
 
 import pytest

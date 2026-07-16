@@ -1,3 +1,8 @@
+"""NWSClient transport tests: retry/backoff, conditional GET (304), and problem+json
+error parsing — the mechanics every collector relies on, isolated from any real
+collector logic. All HTTP mocked via `responses`; no live calls.
+"""
+
 import pytest
 import responses
 

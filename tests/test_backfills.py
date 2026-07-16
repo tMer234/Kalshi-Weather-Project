@@ -17,9 +17,9 @@ from responses import matchers
 
 from kalshi_weather import db
 from kalshi_weather.config import SeriesConfig, Settings, StationConfig
-from kalshi_weather.ingest import CLIMATE_UPSERT
-from kalshi_weather.kalshi_backfill import run_kalshi_backfill
-from kalshi_weather.nws_backfill import run_nws_backfill
+from kalshi_weather.ingest.kalshi_backfill import run_kalshi_backfill
+from kalshi_weather.ingest.nws import CLIMATE_UPSERT
+from kalshi_weather.ingest.nws_backfill import run_nws_backfill
 from kalshi_weather.resolve import ensure_station_stubs
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -148,7 +148,7 @@ def test_nws_backfill_never_regresses_live_value(settings, conn):
 @responses.activate
 def test_live_ingest_stamps_nws_api_source(settings, conn):
     # regression guard on the live path after the source-column change
-    from kalshi_weather.ingest import run_ingest
+    from kalshi_weather.ingest.nws import run_ingest
 
     points = json.loads((FIXTURES / "points_nyc.json").read_text())
     responses.get(f"https://api.weather.gov/points/40.7789,-73.9692", json=points)
@@ -271,11 +271,29 @@ def test_kalshi_backfill_filters_obs_date_range(settings, conn):
 
 @responses.activate
 def test_kalshi_backfill_no_candles_flag(settings, conn):
+    """`backfill kalshi-resolutions` passes include_quotes=False — the candlesticks
+    endpoint must never be hit, but definitions + outcomes still land."""
     _register_kalshi(_settled_payload())
     assert run_kalshi_backfill(
         settings, conn, date(2026, 7, 1), date(2026, 7, 31),
-        include_candles=False, sleep_seconds=0,
+        include_quotes=False, sleep_seconds=0,
     ) == 0
     assert _scalar(conn, "SELECT count(*) FROM markets") == 2
+    assert _scalar(conn, "SELECT count(*) FROM market_outcomes") == 2
     assert _scalar(conn, "SELECT count(*) FROM market_candles") == 0
     assert not [c for c in responses.calls if "candlesticks" in str(c.request.url)]
+
+
+@responses.activate
+def test_kalshi_backfill_no_resolutions_flag(settings, conn):
+    """`backfill kalshi-quotes` passes include_resolutions=False — market_outcomes must
+    stay empty, but definitions (needed for the join) and candles still land."""
+    _register_kalshi(_settled_payload())
+    assert run_kalshi_backfill(
+        settings, conn, date(2026, 7, 1), date(2026, 7, 31),
+        include_resolutions=False, sleep_seconds=0,
+    ) == 0
+    assert _scalar(conn, "SELECT count(*) FROM markets") == 2
+    assert _scalar(conn, "SELECT count(*) FROM market_outcomes") == 0
+    # 2 markets x 3 candle bars in the trimmed fixture — quotes half still runs
+    assert _scalar(conn, "SELECT count(*) FROM market_candles") == 6

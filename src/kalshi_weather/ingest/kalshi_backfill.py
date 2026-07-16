@@ -1,13 +1,24 @@
 """Kalshi historical backfill (Phase 0c): settled-market history + candlestick prices.
 
-Two separate historical datasets, both from the public trade-api/v2:
+Two separate historical datasets, both from the public trade-api/v2, both requiring the
+same settled-market listing fetch (so both are built from it in one pass rather than two
+separate API round-trips):
 
-1. **Settled markets** — /markets?status=settled paginates arbitrarily far back with a
+1. **Resolutions** — /markets?status=settled paginates arbitrarily far back with a
    close-time window; definitions and outcomes flow through the exact same upserts as
    the live collector, so overlap with already-collected data is a no-op.
-2. **Candlestick price bars** — the live collector's market_snapshots only exist from
-   when it started running; /series/{s}/markets/{m}/candlesticks reconstructs hourly
-   (or 1-min/daily) OHLC price history for any market, landing in market_candles.
+2. **Quotes (candlestick price bars)** — the live collector's market_snapshots only
+   exist from when it started running; /series/{s}/markets/{m}/candlesticks
+   reconstructs hourly (or 1-min/daily) OHLC price history for any market, landing in
+   market_candles as the historical stand-in for market_snapshots.
+
+`run_kalshi_backfill()` covers both by default (the combined `kalshi-weather backfill
+kalshi` command); `include_quotes`/`include_resolutions` let the narrower `backfill
+kalshi-quotes` / `backfill kalshi-resolutions` subcommands each run only their half —
+mirrors the live `ingest kalshi-quotes`/`ingest kalshi-resolutions` split in
+`ingest/kalshi.py`. Market *definitions* are always upserted regardless of either flag
+(cheap side effect of the listing fetch both halves need; same precedent as the live
+collector).
 
 Candle fetching is resumable: markets that already have bars at the requested period
 are skipped, so an interrupted backfill continues where it left off.
@@ -21,10 +32,10 @@ from datetime import date, datetime, timedelta, timezone
 
 import duckdb
 
-from .config import SeriesConfig, Settings, StationConfig
-from .ingest import RunResult, _record_run, _utcnow
-from .kalshi_client import KalshiClient, KalshiError
-from .kalshi_ingest import (
+from ..config import SeriesConfig, Settings, StationConfig
+from ..kalshi_client import KalshiClient, KalshiError
+from .common import RunResult, _record_run, _utcnow
+from .kalshi import (
     _MARKET_UPSERT,
     _OUTCOME_UPSERT,
     MarketParseError,
@@ -90,12 +101,13 @@ def backfill_series(
     series: SeriesConfig,
     start: date,
     end: date,
-    include_candles: bool = True,
+    include_quotes: bool = True,
+    include_resolutions: bool = True,
     period_minutes: int = 60,
     sleep_seconds: float = DEFAULT_SLEEP_SECONDS,
 ) -> RunResult:
-    """Backfill one series' settled markets (and optionally candles) for obs_dates in
-    [start, end]."""
+    """Backfill one series' settled markets for obs_dates in [start, end]: definitions
+    always, outcomes iff include_resolutions, candles iff include_quotes."""
     result = RunResult(station.station_id, f"kalshi_backfill:{series.ticker}")
 
     # markets close ~05:00Z the day after obs_date, so a [start, end+2d] close-time
@@ -139,11 +151,13 @@ def backfill_series(
 
     if market_rows:
         conn.executemany(_MARKET_UPSERT, market_rows)
+    result.rows_upserted = len(market_rows)
+    if include_resolutions and outcome_rows:
         conn.executemany(_OUTCOME_UPSERT, outcome_rows)
-    result.rows_upserted = len(market_rows) + len(outcome_rows)
+        result.rows_upserted += len(outcome_rows)
 
     candle_count = 0
-    if include_candles:
+    if include_quotes:
         for market in kept:
             ticker = market["ticker"]
             if _has_candles(conn, ticker, period_minutes):
@@ -183,12 +197,18 @@ def run_kalshi_backfill(
     start: date,
     end: date,
     series_tickers: list[str] | None = None,
-    include_candles: bool = True,
+    include_quotes: bool = True,
+    include_resolutions: bool = True,
     period_minutes: int = 60,
     sleep_seconds: float = DEFAULT_SLEEP_SECONDS,
 ) -> int:
     """Backfill all (or selected) configured series. Exit-code contract matches the
-    live collectors: 0 = at least one series succeeded, 1 = everything failed."""
+    live collectors: 0 = at least one series succeeded, 1 = everything failed.
+
+    `include_quotes`/`include_resolutions` default to True (today's combined `backfill
+    kalshi` behavior); the `backfill kalshi-quotes`/`backfill kalshi-resolutions`
+    subcommands each pass a single flag to run only their half — see
+    plans/data_automation_plan.md."""
     if start > end:
         logger.error("start %s is after end %s", start, end)
         return 1
@@ -210,7 +230,8 @@ def run_kalshi_backfill(
         try:
             result = backfill_series(
                 client, conn, station, series, start, end,
-                include_candles=include_candles,
+                include_quotes=include_quotes,
+                include_resolutions=include_resolutions,
                 period_minutes=period_minutes,
                 sleep_seconds=sleep_seconds,
             )

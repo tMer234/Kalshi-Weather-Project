@@ -43,8 +43,8 @@ CREATE TABLE IF NOT EXISTS grid_forecasts (
     value           DOUBLE,
     unit            VARCHAR,               -- uom with 'wmoUnit:' prefix stripped, e.g. 'degC'
     pulled_at       TIMESTAMP,
-    source          VARCHAR DEFAULT 'nws_api',  -- 'nws_api' now; reserved for a future
-                                               -- NDFD-archive forecast backfill (Phase 0c)
+    source          VARCHAR DEFAULT 'nws_api',  -- 'nws_api' (live) | 'ndfd_archive'
+                                               -- (backfill nws-grid, the NDFD archive)
     PRIMARY KEY (station_id, variable, issued_time, valid_start)
 );
 -- migration for databases created before the source column existed

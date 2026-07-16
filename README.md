@@ -31,6 +31,9 @@ python3.14 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
 cp .env.example .env        # fill in NWS_CONTACT_EMAIL (NWS requires it in User-Agent)
 .venv/bin/python scripts/resolve_stations.py   # one-time; re-run occasionally (grids drift)
+
+# optional, only needed for `backfill nws-grid` (historical forecast vintages):
+.venv/bin/pip install -e ".[ndfd]"
 ```
 
 ## Running
@@ -44,13 +47,25 @@ troubleshooting: [`docs/runbook.md`](docs/runbook.md).**
 .venv/bin/kalshi-weather ingest kalshi       # live Kalshi pass: markets + quotes + outcomes
 .venv/bin/kalshi-weather backfill nws-cli --start 2026-01-01 --end 2026-07-01
                                              # historical climate reports (IEM archive)
+.venv/bin/kalshi-weather backfill nws-grid --start 2026-01-01 --end 2026-07-01
+                                             # historical forecast vintages (NDFD archive;
+                                             # needs: pip install -e ".[ndfd]")
 .venv/bin/kalshi-weather backfill kalshi  --start 2026-01-01 --end 2026-07-01
                                              # historical settled markets + candle prices
 .venv/bin/python -m pytest                   # fixture-based, no network
 ```
 
+`ingest nws`/`ingest kalshi` and `backfill kalshi` each also split into narrower,
+single-purpose subcommands (`nws-grid`/`nws-cli`, `kalshi-quotes`/`kalshi-resolutions`
+for both ingest and backfill) — see the [runbook](docs/runbook.md) §1/§2 for why, and
+when to use which. `backfill nws-cli` was already single-stream. `backfill nws-grid`
+(historical forecast vintages, from the NDFD GRIB2 archive) needs the optional
+`pygrib`/`numpy` dependencies — kept out of the base install since the rest of the
+pipeline never needs them.
+
 (`scripts/run_ingest.py`, `run_kalshi_ingest.py`, `backfill_nws.py`, `backfill_kalshi.py`
-are equivalent shims kept for cron use.)
+are equivalent shims kept for cron use, wrapping the combined `ingest nws`/`ingest
+kalshi` commands only.)
 
 Every command is one idempotent pass: fetch, upsert, exit — safe to re-run any time, and
 backfills can never regress live-collected values. Exit codes: `0` at least one
@@ -123,14 +138,28 @@ src/kalshi_weather/
   kalshi_client.py          public trade-api/v2 wrapper: retry/backoff, pagination,
                             candlesticks
   iem_client.py             Iowa Environmental Mesonet AFOS archive (backfill source)
+  ndfd_client.py            NDFD GRIB2 archive (noaa-ndfd-pds S3 bucket) — grid-forecast
+                            backfill source; S3 listing + download only, no decoding
   time_utils.py             ISO8601 interval parsing, horizon math
   cli_parser.py             CLI text bulletins -> per-station values (fails loudly)
   resolve.py                /points -> grid metadata into stations table
-  ingest.py                 NWS orchestration, per-station error isolation
-  kalshi_ingest.py          Kalshi orchestration: definitions, snapshots, outcomes
-  nws_backfill.py           historical climate reports via IEM
-  kalshi_backfill.py        historical settled markets + candle price bars
+  ingest/
+    common.py               shared RunResult / ingest_runs-writer used by every collector
+    nws.py                  NWS orchestration: grid + climate collectors, run_ingest()
+                             (include_grid/include_climate flags back the nws-grid/nws-cli
+                             subcommands)
+    kalshi.py                Kalshi orchestration: quotes + outcomes, run_kalshi_ingest()
+                              (include_quotes/include_resolutions flags back the
+                              kalshi-quotes/kalshi-resolutions subcommands)
+    nws_backfill.py          historical climate reports via IEM (nws-cli)
+    ndfd_backfill.py         historical forecast vintages via the NDFD GRIB2 archive
+                             (nws-grid; needs the optional `ndfd` extra — pygrib/numpy)
+    kalshi_backfill.py       historical settled markets + candle prices, run_kalshi_backfill()
+                             (include_quotes/include_resolutions flags back the
+                             kalshi-quotes/kalshi-resolutions backfill subcommands)
   db.py / schema.sql        DuckDB connection + idempotent DDL (incl. migrations)
-scripts/                    cron-compatible shims over the same CLI commands
-tests/                      65 tests; fixtures are real recorded NWS/IEM/Kalshi responses
+scripts/                    cron-compatible shims over the ingest nws/ingest kalshi/backfill commands
+tests/                      83 tests; fixtures are real recorded NWS/IEM/Kalshi responses
+                             (the NDFD backfill's pygrib layer is tested against a fake
+                             pygrib module instead — see tests/README.md)
 ```

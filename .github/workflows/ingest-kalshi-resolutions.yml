@@ -1,0 +1,49 @@
+name: ingest-kalshi-resolutions
+
+on:
+  schedule:
+    - cron: "0 3,15 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: weather-db
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -e .
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDP }}
+          service_account: ${{ vars.GCP_SA_EMAIL }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Download canonical DB (tolerate first-run absence)
+        run: |
+          mkdir -p data
+          gcloud storage cp "gs://${{ vars.GCP_BUCKET }}/weather.duckdb" data/weather.duckdb || true
+
+      - name: Run ingest
+        env:
+          NWS_CONTACT_EMAIL: ${{ secrets.NWS_CONTACT_EMAIL }}
+          APP_NAME: kalshi-weather
+          DUCKDB_PATH: data/weather.duckdb
+        run: kalshi-weather ingest kalshi-resolutions
+
+      - name: Upload updated DB
+        run: gcloud storage cp data/weather.duckdb "gs://${{ vars.GCP_BUCKET }}/weather.duckdb"

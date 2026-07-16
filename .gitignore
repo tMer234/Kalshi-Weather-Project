@@ -21,3 +21,4 @@ data/
 plans/
 logs/
 *.duckdb
+docs/gcs_and_actions_setup.md

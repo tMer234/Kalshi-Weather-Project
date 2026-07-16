@@ -102,7 +102,7 @@ runs a cleanup `DELETE`.
 | `value` | numeric forecast value; interpretation depends on the variable class (§4.3) |
 | `unit` | WMO unit with `wmoUnit:` stripped: `degC`, `percent`, `mm`, `km_h-1` (= km/h) **(observed)** |
 | `pulled_at` | when our collector fetched it (UTC) |
-| `source` | provenance: always `'nws_api'` today; reserved for a future NDFD-archive forecast backfill (see runbook §2.1) |
+| `source` | provenance: `'nws_api'` (live collector) or `'ndfd_archive'` (`backfill nws-grid`, the NDFD GRIB2 archive backfill — see runbook §2.1) |
 
 ### 4.2 Why intervals span multiple hours: run-length encoding
 
@@ -177,7 +177,7 @@ These map directly onto Kalshi daily high/low contracts, with one subtlety in §
 | `skyCover` | hourly-state | `percent` | |
 | `probabilityOfPrecipitation` | hourly-state | `percent` | |
 | `quantitativePrecipitation` | accumulation | `mm` | ≤6h buckets |
-| `snowfallAmount` | accumulation | `mm` | liquid-equivalent-style depth in mm; all 0.0 in July data so far — re-verify semantics against winter data before first use |
+| `snowfallAmount` | accumulation | `mm` | **not** liquid-equivalent — NWS API docs explicitly define `quantitativePrecipitation` as liquid precipitation "including the liquid equivalent amount for snow and ice," implying `snowfallAmount` is the separate, actual new-snow-accumulation-per-period field (matches NDFD's archived `snow` element, WMO standard param 0-1-29 "Total Snowfall", units meters — same likely underlying NDFD quantity, just unit-differs). All 0.0 in July data so far (no snow) — still needs a real winter data point to confirm the magnitude empirically; see `docs/runbook.md` §2.1. |
 
 Null values in the NWS payload (periods where a layer has no data) are **skipped at
 ingest**, not stored as NULL rows. Absence of a row ≠ zero — especially for accumulation

@@ -14,9 +14,10 @@ import pytest
 import responses
 from responses import matchers
 
-from kalshi_weather import db, kalshi_ingest
+from kalshi_weather import db
 from kalshi_weather.config import SeriesConfig, Settings, StationConfig
-from kalshi_weather.kalshi_ingest import parse_event_date, run_kalshi_ingest, MarketParseError
+from kalshi_weather.ingest import kalshi as kalshi_ingest
+from kalshi_weather.ingest.kalshi import parse_event_date, run_kalshi_ingest, MarketParseError
 
 FIXTURES = Path(__file__).parent / "fixtures" / "kalshi"
 BASE = "https://api.elections.kalshi.com/trade-api/v2"
@@ -243,6 +244,56 @@ def test_ingest_runs_audit_rows_written(settings, conn):
         ("kalshi_markets:KXHIGHNY", 200, 6, None),
         ("kalshi_outcomes:KXHIGHNY", 200, 4, None),
     ]
+
+
+@responses.activate
+def test_include_resolutions_false_skips_settled_collector(settings, conn):
+    """`ingest kalshi-quotes` passes include_resolutions=False — outcomes/settled
+    definitions must stay untouched, and the settled endpoint must not even be hit."""
+    responses.get(
+        f"{BASE}/markets",
+        json=_open_payload(),
+        match=[
+            matchers.query_param_matcher(
+                {"series_ticker": "KXHIGHNY", "status": "open"}, strict_match=False
+            )
+        ],
+    )
+    assert run_kalshi_ingest(settings, conn, include_resolutions=False) == 0
+
+    markets, snapshots, outcomes = _counts(conn)
+    assert markets == 3
+    assert snapshots == 3
+    assert outcomes == 0
+    endpoints = {
+        r[0] for r in conn.execute("SELECT DISTINCT endpoint FROM ingest_runs").fetchall()
+    }
+    assert endpoints == {"kalshi_markets:KXHIGHNY"}
+
+
+@responses.activate
+def test_include_quotes_false_skips_open_collector(settings, conn):
+    """`ingest kalshi-resolutions` passes include_quotes=False — no new snapshots, and
+    the open-markets endpoint must not even be hit."""
+    responses.get(
+        f"{BASE}/markets",
+        json=_settled_payload(),
+        match=[
+            matchers.query_param_matcher(
+                {"series_ticker": "KXHIGHNY", "status": "settled"}, strict_match=False
+            )
+        ],
+    )
+    assert run_kalshi_ingest(settings, conn, include_quotes=False) == 0
+
+    markets, snapshots, outcomes = _counts(conn)
+    assert markets == 2
+    assert snapshots == 0
+    assert outcomes == 2
+    endpoints = {
+        r[0] for r in conn.execute("SELECT DISTINCT endpoint FROM ingest_runs").fetchall()
+    }
+    assert endpoints == {"kalshi_outcomes:KXHIGHNY"}
 
 
 def test_no_configured_series_is_a_config_failure(settings, conn):

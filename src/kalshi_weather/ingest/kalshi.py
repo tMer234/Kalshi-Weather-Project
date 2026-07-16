@@ -1,6 +1,6 @@
 """Kalshi market-data ingestion (Phase 0b): market definitions, quote snapshots, outcomes.
 
-Single idempotent run, same contract as ingest.py: fetch, upsert, exit. Per-series
+Single idempotent run, same contract as nws.py: fetch, upsert, exit. Per-series
 failures are isolated — one series' error is logged to ingest_runs and never aborts the
 others. Each (station, series, endpoint) pass runs in its own transaction.
 
@@ -10,6 +10,13 @@ Idempotency semantics per table:
                     makes a same-instant replay a no-op
 - market_outcomes:  insert-once (a finalized result must never change; a conflicting
                     re-settlement would be a data incident, not an update)
+
+`run_kalshi_ingest()` covers both collectors by default (the combined `kalshi-weather
+ingest kalshi` command); `include_quotes`/`include_resolutions` let the narrower
+`ingest kalshi-quotes` / `ingest kalshi-resolutions` subcommands each run only their
+half, since quotes want a tight cadence (the cron interval IS the quote-history
+resolution) while resolutions only change once per obs_date — see
+plans/data_automation_plan.md.
 """
 
 from __future__ import annotations
@@ -21,9 +28,9 @@ from typing import Any
 
 import duckdb
 
-from .config import SeriesConfig, Settings, StationConfig
-from .ingest import RunResult, _record_run, _utcnow
-from .kalshi_client import KalshiClient, KalshiError
+from ..config import SeriesConfig, Settings, StationConfig
+from ..kalshi_client import KalshiClient, KalshiError
+from .common import RunResult, _record_run, _utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -256,11 +263,23 @@ def ingest_settled_markets(
 # --- orchestration -----------------------------------------------------------
 
 
-def run_kalshi_ingest(settings: Settings, conn: duckdb.DuckDBPyConnection) -> int:
-    """Run one full Kalshi collection pass. Returns a process exit code:
+def run_kalshi_ingest(
+    settings: Settings,
+    conn: duckdb.DuckDBPyConnection,
+    include_quotes: bool = True,
+    include_resolutions: bool = True,
+) -> int:
+    """Run one Kalshi collection pass. Returns a process exit code:
 
     0 — at least one (station, series) succeeded end to end
     1 — every series failed, or no station has kalshi_series configured
+
+    `include_quotes`/`include_resolutions` default to True (today's combined `ingest
+    kalshi` behavior); the `ingest kalshi-quotes`/`ingest kalshi-resolutions`
+    subcommands each pass a single flag to run only their half — see
+    plans/data_automation_plan.md. Note both collectors independently upsert market
+    *definitions* as a side effect (idempotent/update-in-place), so leaving that
+    overlap in place after the split is harmless.
     """
     client = KalshiClient()
     pairs = [(st, s) for st in settings.stations for s in st.kalshi_series]
@@ -268,7 +287,12 @@ def run_kalshi_ingest(settings: Settings, conn: duckdb.DuckDBPyConnection) -> in
         logger.error("no station has kalshi_series configured — nothing to collect")
         return 1
 
-    collectors = [ingest_open_markets, ingest_settled_markets]
+    collectors = []
+    if include_quotes:
+        collectors.append(ingest_open_markets)
+    if include_resolutions:
+        collectors.append(ingest_settled_markets)
+
     series_ok = 0
     for station, series in pairs:
         results = []

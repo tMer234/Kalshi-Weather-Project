@@ -15,7 +15,7 @@ import responses
 
 from kalshi_weather import db
 from kalshi_weather.config import Settings, StationConfig
-from kalshi_weather.ingest import run_ingest
+from kalshi_weather.ingest.nws import run_ingest
 
 FIXTURES = Path(__file__).parent / "fixtures"
 BASE = "https://api.weather.gov"
@@ -78,6 +78,14 @@ def _register_points_and_grid():
         json=_grid_payload(),
         headers={"Last-Modified": "Thu, 09 Jul 2026 19:03:33 GMT"},
     )
+
+
+def _register_points_only():
+    """Station resolution (ensure_stations_resolved) always hits /points, even on an
+    include_grid=False pass — but the grid-data endpoint itself must NOT be mocked
+    there, so an accidental fetch fails the test loudly (unregistered URL)."""
+    LOGGER.debug("Mocking NWS points endpoint for station lat/lon (grid data NOT mocked)")
+    responses.get(f"{BASE}/points/40.7789,-73.9692", json=_points_payload())
 
 
 def _register_cli(products: list[tuple[str, str, str]]):
@@ -287,3 +295,41 @@ def test_ingest_runs_audit_rows_written(settings, conn):
         "SELECT endpoint, http_status, rows_upserted, error FROM ingest_runs ORDER BY endpoint"
     ).fetchall()
     assert runs == [("climate_reports", 200, 4, None), ("grid_forecasts", 200, 44, None)]
+
+
+@responses.activate
+def test_include_climate_false_skips_climate_collector(settings, conn):
+    """`ingest nws-grid` passes include_climate=False — climate_reports must stay
+    untouched and no climate_reports ingest_runs row should be written."""
+    LOGGER.info("Starting include_climate=False test")
+    _register_points_and_grid()
+
+    assert run_ingest(settings, conn, include_climate=False) == 0
+
+    grid, cli = _counts(conn)
+    assert grid == 44
+    assert cli == 0
+    endpoints = {
+        r[0] for r in conn.execute("SELECT DISTINCT endpoint FROM ingest_runs").fetchall()
+    }
+    assert endpoints == {"grid_forecasts"}
+
+
+@responses.activate
+def test_include_grid_false_skips_grid_collector(settings, conn):
+    """`ingest nws-cli` passes include_grid=False — grid_forecasts must stay untouched
+    (and the grid-data endpoint must not even be fetched) while climate reports still
+    land normally."""
+    LOGGER.info("Starting include_grid=False test")
+    _register_points_only()
+    _register_cli([("prod-1", "2026-07-09T06:26:00+00:00", _cli_text())])
+
+    assert run_ingest(settings, conn, include_grid=False) == 0
+
+    grid, cli = _counts(conn)
+    assert grid == 0
+    assert cli == 4
+    endpoints = {
+        r[0] for r in conn.execute("SELECT DISTINCT endpoint FROM ingest_runs").fetchall()
+    }
+    assert endpoints == {"climate_reports"}

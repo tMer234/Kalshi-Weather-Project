@@ -18,6 +18,13 @@ dev = [
     "pytest>=8.0",
     "responses>=0.25",
 ]
+# GRIB2 decoding for `backfill nws-grid` (historical forecast vintages, NDFD archive).
+# Heavy binary deps (eccodes via wheel) not needed by the rest of the pipeline, so kept
+# out of `dev` — install with `pip install -e '.[ndfd]'`. See docs/runbook.md §2.1.
+ndfd = [
+    "pygrib>=2.1",
+    "numpy>=1.24",
+]
 
 [project.scripts]
 kalshi-weather = "kalshi_weather.cli:app"

@@ -1,25 +1,31 @@
-"""Ingestion orchestration: grid forecasts + CLI climate reports (+ optional METAR).
+"""NWS ingestion: grid forecasts + CLI climate reports (+ optional METAR).
 
 Single idempotent run: fetch, upsert, exit. Per-station failures are isolated — one
 station's error is logged to ingest_runs and must never abort the others. Stations are
 processed sequentially (polite API citizenship), each inside its own transaction.
+
+`run_ingest()` covers both collectors by default (the combined `kalshi-weather ingest
+nws` command); `include_grid`/`include_climate` let the narrower `ingest nws-grid` /
+`ingest nws-cli` subcommands each run only their half, since the two have genuinely
+different natural cadences (grid forecasts re-issue roughly hourly; CLI reports change
+a handful of times a day) — see plans/data_automation_plan.md.
 """
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from functools import partial
 
 import duckdb
 
-from .cli_parser import CLIParseError, parse_cli_product
-from .config import Settings
-from .nws_client import NWSClient, NWSError
-from .resolve import ensure_stations_resolved
-from .time_utils import horizon_hours, parse_interval, to_utc_naive
+from ..cli_parser import CLIParseError, parse_cli_product
+from ..config import Settings
+from ..nws_client import NWSClient, NWSError
+from ..resolve import ensure_stations_resolved
+from ..time_utils import horizon_hours, parse_interval, to_utc_naive
+from .common import RunResult, _record_run, _utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -89,23 +95,6 @@ ON CONFLICT (obs_station_id, variable, timestamp) DO NOTHING
 
 # METAR properties worth keeping as supplementary signals
 OBS_VARIABLES = ["temperature", "dewpoint", "windSpeed", "windGust", "precipitationLastHour"]
-
-
-@dataclass
-class RunResult:
-    station_id: str
-    endpoint: str
-    http_status: int | None = None
-    rows_upserted: int = 0
-    error: str | None = None
-
-    @property
-    def ok(self) -> bool:
-        return self.error is None
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def _normalize_unit(uom: str | None) -> str | None:
@@ -320,42 +309,32 @@ def ingest_observations(
 # --- orchestration -----------------------------------------------------------
 
 
-def _record_run(
-    conn: duckdb.DuckDBPyConnection, started_at: datetime, result: RunResult
-) -> None:
-    conn.execute(
-        "INSERT INTO ingest_runs (started_at, finished_at, station_id, endpoint, "
-        "http_status, rows_upserted, error) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        [
-            started_at,
-            _utcnow(),
-            result.station_id,
-            result.endpoint,
-            result.http_status,
-            result.rows_upserted,
-            result.error,
-        ],
-    )
-
-
 def run_ingest(
     settings: Settings,
     conn: duckdb.DuckDBPyConnection,
+    include_grid: bool = True,
+    include_climate: bool = True,
     include_metar: bool = False,
     metar_days: int = 7,
 ) -> int:
-    """Run one full collection pass. Returns a process exit code:
+    """Run one collection pass. Returns a process exit code:
 
     0 — at least one station succeeded end to end
     1 — every station failed (config/auth errors raise before we get here)
+
+    `include_grid`/`include_climate` default to True (today's combined `ingest nws`
+    behavior); the `ingest nws-grid`/`ingest nws-cli` subcommands each pass a single
+    flag to run only their half, since the two collectors have different natural
+    cadences (see plans/data_automation_plan.md).
     """
     client = NWSClient(user_agent=settings.user_agent)
     ensure_stations_resolved(client, conn, settings.stations)
 
-    collectors: list[tuple[str, Callable[..., RunResult]]] = [
-        ("grid_forecasts", ingest_grid_forecasts),
-        ("climate_reports", ingest_climate_reports),
-    ]
+    collectors: list[tuple[str, Callable[..., RunResult]]] = []
+    if include_grid:
+        collectors.append(("grid_forecasts", ingest_grid_forecasts))
+    if include_climate:
+        collectors.append(("climate_reports", ingest_climate_reports))
     if include_metar:
         collectors.append(
             ("observations", partial(ingest_observations, days=metar_days))
