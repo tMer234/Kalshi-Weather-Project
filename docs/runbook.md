@@ -94,23 +94,29 @@ both; `ingest kalshi-quotes` and `ingest kalshi-resolutions` each pass a single 
 note both halves independently upsert market *definitions* as a side effect regardless
 of which flag is set (idempotent, harmless overlap).
 
-- **Cadence: `kalshi-quotes`'s interval IS the quote-history resolution** — every 10
-  minutes gives ~144 quote points per market per day. Phase 0b target is 5–15 min.
-  `kalshi-resolutions` runs twice daily instead — contracts settle once per obs_date, so
-  checking at quote frequency would be pure waste.
-- Missing runs: definitions and outcomes self-heal (the settled lookback covers ~10
-  days); **snapshot gaps are permanent** for the missed window, though candlestick
-  backfill (§2.2) reconstructs hourly bars after the fact — another reason
-  `kalshi-quotes` needs the tight cadence and `kalshi-resolutions` doesn't.
+- **`kalshi-quotes` is no longer live-collected.** Decided 2026-07-20: the live 10-min
+  snapshot collector was retired in favor of a once-daily `backfill kalshi-quotes` run at
+  15:00 UTC (`.github/workflows/backfill-kalshi-quotes-daily.yml`) — candlesticks
+  reconstruct 1-min price history after the fact (confirmed retained by Kalshi at least 18
+  days post-settlement), finer than the live collector's *realized* cadence ever was, and
+  nothing through Phase 7 needs anything beyond mid price. `market_snapshots` is now a
+  frozen historical table (rows from before this date), not an actively-growing one — see
+  `plans/data_automation_plan.md` for the full rationale and `docs/data_dictionary.md`
+  §11.2b for the updated quote-history source guidance.
+- `kalshi-resolutions` still runs twice daily (`ingest kalshi-resolutions`) — contracts
+  settle once per obs_date. Missing runs self-heal (the settled lookback covers ~10 days).
 - ~13 requests per pass across 6 series; occasional 429s are expected and retried
   automatically.
 
 ### 1.3 Suggested crontab
 
 ```cron
-17 * * * *   cd /path/to/Kalshi_Weather_Project && .venv/bin/kalshi-weather ingest nws    >> logs/cron.log 2>&1
-*/10 * * * * cd /path/to/Kalshi_Weather_Project && .venv/bin/kalshi-weather ingest kalshi >> logs/kalshi_cron.log 2>&1
+17 * * * *   cd /path/to/Kalshi_Weather_Project && .venv/bin/kalshi-weather ingest nws                >> logs/cron.log 2>&1
+0 15 * * *   cd /path/to/Kalshi_Weather_Project && .venv/bin/kalshi-weather backfill kalshi-quotes --start "$(date -u -d yesterday +%F)" --end "$(date -u -d yesterday +%F)" --period 1 >> logs/kalshi_cron.log 2>&1
 ```
+
+(In production this runs as `.github/workflows/backfill-kalshi-quotes-daily.yml` instead
+of local cron — see §1.2 above.)
 
 As of 2026-07-11 **no cron is installed** — both collectors only run when invoked by
 hand. Data since the last manual run is missing until the next invocation (recoverable
@@ -323,9 +329,12 @@ SELECT endpoint, count(*) runs, sum(rows_upserted) new_rows, max(finished_at) la
 FROM ingest_runs WHERE started_at > now() - INTERVAL 1 DAY GROUP BY endpoint;
 
 -- staleness check: how old is the newest data in each table?
+-- market_snapshots is frozen (retired 2026-07-20, no longer live-collected) — kept here
+-- only to notice if it's ever accidentally revived; market_candles is the live signal now.
 SELECT 'grid_forecasts' t, max(pulled_at) newest FROM grid_forecasts
 UNION ALL SELECT 'climate_reports', max(pulled_at) FROM climate_reports
-UNION ALL SELECT 'market_snapshots', max(snapshot_time) FROM market_snapshots;
+UNION ALL SELECT 'market_snapshots', max(snapshot_time) FROM market_snapshots
+UNION ALL SELECT 'market_candles', max(pulled_at) FROM market_candles;
 
 -- settlement cross-check: Kalshi's settled value vs our independently parsed CLI value
 -- (mismatch on a *settled* day = investigate; today mismatching = normal, see below)

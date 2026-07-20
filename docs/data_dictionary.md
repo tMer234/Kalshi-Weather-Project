@@ -491,11 +491,20 @@ refreshed on every pass.
 | `expected_expiration_time` | UTC. Per current market rules: "the first 7:00 or 8:00 AM ET following the release of the data" — i.e. the morning after the CLI final lands |
 | `status` | latest seen: `active` → `closed` → `settled`/`finalized` **(observed: listings show open markets as `active`, though the query param is `open`)** |
 
-### 11.2 `market_snapshots` — quote history (append-only)
+### 11.2 `market_snapshots` — quote history (append-only, frozen 2026-07-20)
 
 One row per open market per collector pass; `snapshot_time` is shared across the whole
 pass so a pass's snapshots join to each other and to `grid_forecasts` vintages cleanly.
-The cron cadence IS the quote-history resolution (target: every 5–15 min while open).
+
+**Retired 2026-07-20**: the live 10-min collector that grew this table was replaced by a
+once-daily `market_candles` backfill (§11.2b) — every workflow does a whole-file GCS
+pull/push, so this table's 10-min cadence (far more frequent than any other workflow) was
+multiplying the shared DB's egress cost for data candlesticks already reconstruct at finer
+(1-min) resolution. Nothing through master-plan Phase 7 needs anything beyond mid price;
+Phase 8 (the only phase needing quote-level detail) plans its own dedicated order-book
+depth collector regardless, since even this table was only ever top-of-book. Rows already
+collected stay in place as historical data; nothing new is added going forward. See
+`plans/data_automation_plan.md` for the full rationale.
 
 - **All prices are dollars per $1 contract** (parsed from the API's `*_dollars` string
   fields), so `yes_bid`/`yes_ask` ∈ [0, 1] read directly as probabilities: mid =
@@ -521,9 +530,12 @@ candlesticks endpoint into this table. One row per `(ticker, period_minutes, per
 | `volume` | contracts traded within the bar (fractional allowed) |
 | `open_interest` | outstanding contracts at bar end |
 
-Snapshot-vs-candle choice for analysis: prefer `market_snapshots` where it exists
-(higher resolution, includes displayed size); fall back to candles for history. The two
-agree on convention (dollars, UTC) by construction.
+Snapshot-vs-candle choice for analysis: `market_candles` is now the only actively-growing
+quote-history source (see §11.2's 2026-07-20 note) — use it for anything after that date.
+`market_snapshots` only covers markets active before then; where both exist for the same
+window, snapshots offer higher resolution and displayed size, but that's a shrinking,
+frozen slice of history, not the general case going forward. The two agree on convention
+(dollars, UTC) by construction, so joining across the cutover is safe.
 
 ### 11.3 `market_outcomes` — Kalshi's own settlement (insert-once)
 
