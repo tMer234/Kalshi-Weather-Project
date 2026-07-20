@@ -243,6 +243,12 @@ def backfill_nws_grid(
     sleep: float = typer.Option(
         0.2, "--sleep", help="Seconds between NDFD archive requests (politeness)."
     ),
+    issuance_cadence: str = typer.Option(
+        "hourly", "--issuance-cadence",
+        help="'hourly' (default) thins the archive's ~30-min native cadence to match the "
+        "live collector's own hourly cadence, so backfilled and live-collected history "
+        "stay density-consistent; 'full' keeps every archived issuance (~2x the rows).",
+    ),
     duckdb_path: Path | None = DB_OPTION,
 ) -> None:
     """Backfill historical forecast vintages (grid_forecasts) from the NDFD GRIB2 archive.
@@ -254,7 +260,12 @@ def backfill_nws_grid(
     was validated (9/11 variables match closely; probabilityOfPrecipitation backfills
     at a coarser 12h resolution; snowfallAmount's unit conversion is unconfirmed against
     real winter data)."""
-    from .ingest.ndfd_backfill import run_ndfd_backfill
+    from .ingest.ndfd_backfill import DEFAULT_ISSUANCE_CADENCE_MINUTES, run_ndfd_backfill
+
+    if issuance_cadence not in ("hourly", "full"):
+        logging.getLogger(__name__).error("--issuance-cadence must be 'hourly' or 'full'")
+        raise typer.Exit(EXIT_CONFIG_ERROR)
+    cadence_minutes = DEFAULT_ISSUANCE_CADENCE_MINUTES if issuance_cadence == "hourly" else None
 
     _setup_logging("ndfd_backfill.log")
     settings = _load_settings_or_exit()
@@ -266,6 +277,7 @@ def backfill_nws_grid(
                 station_ids=list(station) if station else None,
                 variables=list(variable) if variable else None,
                 sleep_seconds=sleep,
+                issuance_cadence_minutes=cadence_minutes,
             ),
             settings,
             duckdb_path,

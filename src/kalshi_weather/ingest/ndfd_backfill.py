@@ -58,6 +58,17 @@ SUFFIX = "98"
 # deduped S3 listing calls, never wrong data.
 _LOOKBACK_DAYS = MAX_HORIZON_HOURS // 24 + 2
 
+# The archive reissues every element roughly every 30 min (~48 issuances/UTC day); the
+# live collector (`ingest nws-grid`) only runs hourly (~24/day) and can never do better.
+# Backfilling at full archive cadence stores forecast vintages ~2x denser than live
+# history ever will be — near-duplicate pseudo-replicates of the same NWS model cycle
+# that add no independent statistical information (nothing downstream needs finer than
+# hourly resolution) but do inflate pooled-sample-size statistics and create a density
+# discontinuity right at the backfill/live boundary. Default to hourly so backfilled and
+# live-collected history are density-consistent; `--issuance-cadence full` opts back into
+# every archived vintage for a specific research question. See docs/runbook.md §2.1.
+DEFAULT_ISSUANCE_CADENCE_MINUTES = 60
+
 
 @dataclass(frozen=True)
 class NDFDElement:
@@ -141,11 +152,23 @@ def _message_window(grb, period: bool) -> tuple[datetime, datetime]:
     return valid_start, valid_start + timedelta(hours=1)
 
 
-def _decode_element_file(raw: bytes, issued: datetime, period: bool) -> list[GridMessage]:
-    """Open one GRIB2 file's bytes and return every in-horizon message's grid.
+def _decode_element_file(raw: bytes, issued: datetime, period: bool):
+    """Yield every in-horizon message's grid from one GRIB2 file's bytes, lazily.
 
-    pygrib only opens from a filepath, so the bytes are staged to a temp file and
-    removed immediately after decoding.
+    A generator, not a list, on purpose: an instantaneous day1-3 element (temperature,
+    dewpoint, ...) carries one message per forecast hour, so ~72 full-CONUS-grid messages
+    land in a single file. Each message's `values` array alone is ~24 MB (a ~2145x1377
+    float64 grid), so materializing all of them at once would pin ~5 GB of numpy memory
+    per file. Yielding one at a time lets the caller extract its station values and drop
+    the array before the next is decoded, bounding resident grid memory to O(1) message.
+
+    The lat/lon grids are identical for every message in a file (same fixed NDFD grid), so
+    they're decoded once and shared across all yielded messages rather than re-materialized
+    per message — `_nearest_value` only ever reads them, so sharing is safe and saves a
+    further ~2x on grid memory.
+
+    pygrib only opens from a filepath, so the bytes are staged to a temp file and removed
+    once the generator is exhausted (or closed early on an exception in the caller).
     """
     pygrib, np = _ensure_pygrib()
     import os
@@ -155,7 +178,7 @@ def _decode_element_file(raw: bytes, issued: datetime, period: bool) -> list[Gri
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(raw)
-        messages = []
+        lats = lons = None
         with pygrib.open(path) as gribs:
             for grb in gribs:
                 start, end = _message_window(grb, period)
@@ -164,9 +187,9 @@ def _decode_element_file(raw: bytes, issued: datetime, period: bool) -> list[Gri
                 values = grb.values
                 if np.ma.is_masked(values):
                     values = values.filled(np.nan)
-                lats, lons = grb.latlons()
-                messages.append(GridMessage(start, end, values, lats, lons))
-        return messages
+                if lats is None:  # same grid for every message in the file — decode once
+                    lats, lons = grb.latlons()
+                yield GridMessage(start, end, values, lats, lons)
     finally:
         os.unlink(path)
 
@@ -180,6 +203,32 @@ def _nearest_value(values, lats, lons, station_lat: float, station_lon: float) -
     return None if np.isnan(val) else val
 
 
+def _thin_to_cadence(keys: list[str], cadence_minutes: int | None) -> list[str]:
+    """Keep one key per `cadence_minutes` bucket of issuance time (the earliest in each).
+
+    `cadence_minutes=None` (or <= 0) disables thinning — every listed key is kept. Keys
+    are grouped by `issued_time // cadence_minutes`, e.g. cadence_minutes=60 keeps the
+    first archive issuance in each UTC hour, matching the live collector's own hourly
+    cadence so backfilled and live-collected history are density-consistent. Purely a
+    pre-fetch filter: dropped keys are never downloaded, decoded, or `_mark_fetched`'d,
+    and re-running derives the identical kept set, so resumability is unaffected.
+    """
+    if not cadence_minutes or cadence_minutes <= 0:
+        return keys
+    kept: list[str] = []
+    seen_buckets: set[datetime] = set()
+    for key in sorted(keys, key=issued_time_from_key):
+        issued = issued_time_from_key(key)
+        bucket_index = (issued.hour * 60 + issued.minute) // cadence_minutes
+        bucket = issued.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(
+            minutes=bucket_index * cadence_minutes
+        )
+        if bucket not in seen_buckets:
+            seen_buckets.add(bucket)
+            kept.append(key)
+    return kept
+
+
 # --- orchestration -------------------------------------------------------------------
 
 
@@ -191,49 +240,96 @@ def backfill_element(
     list_start: date,
     list_end: date,
     sleep_seconds: float,
+    issuance_cadence_minutes: int | None = DEFAULT_ISSUANCE_CADENCE_MINUTES,
 ) -> RunResult:
-    """Backfill one variable across every station for UTC issuance days [list_start, list_end]."""
+    """Backfill one variable across every station for UTC issuance days [list_start, list_end].
+
+    Commits one UTC issuance day at a time, each in its own transaction: an instantaneous
+    hourly element over the multi-day listing window is ~1M candidate rows, and buffering
+    the whole variable x date-range x station cross product before a single bulk insert (as
+    an earlier version did) pinned that entire list in Python *and* held one hour-long
+    uncommitted DuckDB transaction — which is what OOM'd a real run. Per-day commits bound
+    both to a single day's worth (~thousands of rows) and make resumability finer-grained:
+    a mid-run failure leaves every already-committed day durably upserted, and the http_cache
+    marks committed alongside them mean a re-run skips exactly those days' keys. The caller
+    (`run_ndfd_backfill`) owns no transaction — all transaction control lives here.
+
+    `issuance_cadence_minutes` thins the archive's ~30-min-cadence listing down to one
+    issuance per bucket (see `_thin_to_cadence`) before anything is downloaded — pass None
+    for full archive fidelity.
+    """
     result = RunResult("ALL", f"ndfd_backfill:{element.variable}")
-    rows = []
+    total = 0
     day = list_start
     while day <= list_end:
-        keys = client.list_day(element.path, day, REGION, SUFFIX)
+        listed = client.list_day(element.path, day, REGION, SUFFIX)  # network I/O, pre-transaction
         result.http_status = 200
-        for key in keys:
-            if _seen(conn, key):
-                continue
-            issued = issued_time_from_key(key)
-            raw = client.download(key)
-            for msg in _decode_element_file(raw, issued, element.period):
-                h = horizon_hours(issued, msg.valid_start)
-                for station in stations:
-                    val = _nearest_value(msg.values, msg.lats, msg.lons, station.lat, station.lon)
-                    if val is None:
-                        continue
-                    rows.append(
-                        (
-                            station.station_id,
-                            element.variable,
-                            issued,
-                            msg.valid_start,
-                            msg.valid_end,
-                            h,
-                            element.convert(val),
-                            element.unit,
-                            _utcnow(),
-                            "ndfd_archive",
+        thinned = _thin_to_cadence(listed, issuance_cadence_minutes)
+        to_fetch = [k for k in thinned if not _seen(conn, k)]
+        logger.info(
+            "%s %s: %d keys listed, %d kept after cadence thinning, %d already cached, %d to download",
+            element.variable, day, len(listed), len(thinned), len(thinned) - len(to_fetch), len(to_fetch),
+        )
+        rows: list = []
+        conn.execute("BEGIN")
+        try:
+            for i, key in enumerate(to_fetch, 1):
+                issued = issued_time_from_key(key)
+                t_dl = time.monotonic()
+                logger.info(
+                    "%s %s: downloading %s (%d/%d)", element.variable, day, key, i, len(to_fetch)
+                )
+                raw = client.download(key)
+                logger.info(
+                    "%s %s: downloaded %s in %.1fs (%.1f MB)",
+                    element.variable, day, key, time.monotonic() - t_dl, len(raw) / 1e6,
+                )
+                t_decode = time.monotonic()
+                n_messages = 0
+                for msg in _decode_element_file(raw, issued, element.period):
+                    n_messages += 1
+                    h = horizon_hours(issued, msg.valid_start)
+                    for station in stations:
+                        val = _nearest_value(
+                            msg.values, msg.lats, msg.lons, station.lat, station.lon
                         )
-                    )
-            _mark_fetched(conn, key, None)
-            time.sleep(sleep_seconds)
+                        if val is None:
+                            continue
+                        rows.append(
+                            (
+                                station.station_id,
+                                element.variable,
+                                issued,
+                                msg.valid_start,
+                                msg.valid_end,
+                                h,
+                                element.convert(val),
+                                element.unit,
+                                _utcnow(),
+                                "ndfd_archive",
+                            )
+                        )
+                logger.info(
+                    "%s %s: decoded %s in %.1fs (%d in-horizon messages, %d rows so far)",
+                    element.variable, day, key, time.monotonic() - t_decode, n_messages, len(rows),
+                )
+                _mark_fetched(conn, key, None)
+                time.sleep(sleep_seconds)
+            if rows:
+                logger.info("%s %s: committing %d rows", element.variable, day, len(rows))
+                conn.executemany(_GRID_UPSERT, rows)
+            conn.execute("COMMIT")
+        except BaseException:
+            conn.execute("ROLLBACK")  # drop this day's partial work; earlier days stay committed
+            raise
+        total += len(rows)
+        logger.info("%s %s: committed %d rows", element.variable, day, len(rows))
         day += timedelta(days=1)
 
-    if rows:
-        conn.executemany(_GRID_UPSERT, rows)
-    result.rows_upserted = len(rows)
+    result.rows_upserted = total
     logger.info(
         "%s: backfilled %d grid_forecasts rows for issuance days %s..%s",
-        element.variable, len(rows), list_start, list_end,
+        element.variable, total, list_start, list_end,
     )
     return result
 
@@ -246,11 +342,17 @@ def run_ndfd_backfill(
     station_ids: list[str] | None = None,
     variables: list[str] | None = None,
     sleep_seconds: float = DEFAULT_SLEEP_SECONDS,
+    issuance_cadence_minutes: int | None = DEFAULT_ISSUANCE_CADENCE_MINUTES,
 ) -> int:
     """Backfill grid_forecasts for obs_dates in [start, end] from the NDFD archive.
 
     Exit-code contract matches the other backfills: 0 = at least one variable's backfill
     succeeded, 1 = every variable failed (or a config error prevented starting).
+
+    `issuance_cadence_minutes` (default 60, i.e. hourly) thins the archive's ~30-min
+    native cadence down to one issuance per bucket, matching the live collector's own
+    cadence so backfilled and live-collected history stay density-consistent — pass None
+    for full archive fidelity.
     """
     if start > end:
         logger.error("start %s is after end %s", start, end)
@@ -277,15 +379,20 @@ def run_ndfd_backfill(
 
     ok = 0
     for element in elements:
+        logger.info(
+            "%s: starting (issuance days %s..%s, %d stations)",
+            element.variable, list_start, list_end, len(stations),
+        )
         started_at = _utcnow()
-        conn.execute("BEGIN")
         try:
+            # backfill_element owns per-day transactions; on failure it has already rolled
+            # back the in-flight day and left every earlier day committed and durable, so
+            # there is no transaction to unwind here.
             result = backfill_element(
-                client, conn, element, stations, list_start, list_end, sleep_seconds
+                client, conn, element, stations, list_start, list_end, sleep_seconds,
+                issuance_cadence_minutes,
             )
-            conn.execute("COMMIT")
         except (NDFDError, ValueError, OSError) as e:
-            conn.execute("ROLLBACK")
             result = RunResult(
                 "ALL", f"ndfd_backfill:{element.variable}", error=str(e)[:500]
             )

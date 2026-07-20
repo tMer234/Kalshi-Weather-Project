@@ -89,6 +89,32 @@ def test_issued_time_from_key():
     assert issued_time_from_key(key) == datetime(2026, 7, 10, 6, 0)
 
 
+def _key(hhmm: str) -> str:
+    return f"wmo/temp/2026/07/10/YEUZ98_KWBN_20260710{hhmm}"
+
+
+def test_thin_to_cadence_keeps_one_per_hour():
+    from kalshi_weather.ingest.ndfd_backfill import _thin_to_cadence
+
+    keys = [_key("0016"), _key("0046"), _key("0116"), _key("0146")]
+    assert _thin_to_cadence(keys, 60) == [_key("0016"), _key("0116")]
+
+
+def test_thin_to_cadence_keeps_earliest_in_bucket_regardless_of_input_order():
+    from kalshi_weather.ingest.ndfd_backfill import _thin_to_cadence
+
+    keys = [_key("0046"), _key("0016")]  # deliberately out of chronological order
+    assert _thin_to_cadence(keys, 60) == [_key("0016")]
+
+
+def test_thin_to_cadence_none_or_zero_disables_thinning():
+    from kalshi_weather.ingest.ndfd_backfill import _thin_to_cadence
+
+    keys = [_key("0016"), _key("0046"), _key("0116")]
+    assert _thin_to_cadence(keys, None) == keys
+    assert _thin_to_cadence(keys, 0) == keys
+
+
 def test_message_window_period_uses_valid_datetimes():
     # Real NDFD maxt: minute step units -> pygrib gives validDate (period start) and
     # validityDate/validityTime (period end); startStep/endStep are unit-suffixed strings.
@@ -187,7 +213,7 @@ def test_decode_element_file_filters_beyond_max_horizon(fake_pygrib):
     )
     fake_pygrib([in_range, out_of_range])
 
-    messages = _decode_element_file(b"unused", issued, period=True)
+    messages = list(_decode_element_file(b"unused", issued, period=True))
 
     assert len(messages) == 1
     assert messages[0].valid_start == issued + timedelta(hours=6)
@@ -199,9 +225,29 @@ def test_decode_element_file_unmasks_nan(fake_pygrib):
     issued = datetime(2026, 7, 10)
     fake_pygrib([_FakeGrb(issued + timedelta(hours=1), issued + timedelta(hours=13), masked, lats, lons)])
 
-    messages = _decode_element_file(b"unused", issued, period=True)
+    messages = list(_decode_element_file(b"unused", issued, period=True))
 
     assert np.isnan(messages[0].values[0, 0])
+
+
+def test_decode_element_file_shares_latlons_across_messages(fake_pygrib):
+    """The lat/lon grid is decoded once and shared across a file's messages (they're the
+    same fixed NDFD grid) — every yielded message must reference the identical arrays."""
+    lats, lons = np.array([[40.0]]), np.array([[-74.0]])
+    issued = datetime(2026, 7, 10)
+    m1 = _FakeGrb(issued + timedelta(hours=1), issued + timedelta(hours=2), np.array([[300.0]]), lats, lons)
+    # a distinct-object lat/lon grid on the 2nd message must be ignored in favor of the 1st's
+    m2 = _FakeGrb(
+        issued + timedelta(hours=2), issued + timedelta(hours=3), np.array([[301.0]]),
+        np.array([[40.0]]), np.array([[-74.0]]),
+    )
+    fake_pygrib([m1, m2])
+
+    messages = list(_decode_element_file(b"unused", issued, period=False))
+
+    assert len(messages) == 2
+    assert messages[0].lats is messages[1].lats
+    assert messages[0].lons is messages[1].lons
 
 
 # --- NDFDClient S3 listing -------------------------------------------------------------
@@ -224,6 +270,52 @@ def test_list_day_filters_region_and_suffix():
     client = NDFDClient(user_agent="test")
     keys = client.list_day("maxt", date(2026, 7, 10), "UZ", "98")
     assert keys == ["wmo/maxt/2026/07/10/YGUZ98_KWBN_202607100600"]
+
+
+# --- hard wall-clock timeout ------------------------------------------------------------
+# Regression coverage for a real hang seen against NOAA's S3 archive: `requests`' own
+# `timeout=` only bounds the gap *between* socket reads, not a request's total wall-clock
+# time, so a connection the server silently killed (picked back up from the pool) or one
+# trickling bytes just under that gap can block forever. `_run_with_hard_timeout` wraps
+# the call in a real ceiling so it fails fast (and is retryable) instead of hanging.
+
+
+def test_run_with_hard_timeout_raises_on_hang():
+    import time
+
+    from kalshi_weather.ndfd_client import _HardTimeoutError, _run_with_hard_timeout
+
+    with pytest.raises(_HardTimeoutError):
+        _run_with_hard_timeout(time.sleep, 0.05, 5)
+
+
+def test_run_with_hard_timeout_passes_through_result_and_errors():
+    from kalshi_weather.ndfd_client import _run_with_hard_timeout
+
+    assert _run_with_hard_timeout(lambda x: x + 1, 1.0, 41) == 42
+
+    def raises():
+        raise ValueError("boom")
+
+    with pytest.raises(ValueError, match="boom"):
+        _run_with_hard_timeout(raises, 1.0)
+
+
+def test_hung_connection_surfaces_as_ndfd_error_not_a_hang(monkeypatch):
+    """A GET that never returns must fail fast via the hard-timeout ceiling and come out
+    as NDFDError, not hang forever or raise an uncaught exception."""
+    import time
+
+    from kalshi_weather import ndfd_client as ndfd_client_module
+    from kalshi_weather.ndfd_client import NDFDClient, NDFDError
+
+    monkeypatch.setattr(ndfd_client_module, "HARD_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(ndfd_client_module, "RETRY_ATTEMPTS", 2)
+    client = NDFDClient(user_agent="test", retry_initial_seconds=0.01)
+    monkeypatch.setattr(client.session, "get", lambda *a, **k: time.sleep(5))
+
+    with pytest.raises(NDFDError):
+        client._get()
 
 
 # --- end-to-end orchestration (decode layer monkeypatched) ---------------------------
@@ -320,6 +412,113 @@ def test_ndfd_backfill_variable_filter(settings, conn, monkeypatch):
         "SELECT station_id, variable, round(value, 2), unit FROM grid_forecasts"
     ).fetchall()
     assert rows == [("nyc", "windSpeed", 36.0, "km_h-1")]  # 10 m/s * 3.6
+
+
+def _listing_for(key: str) -> str:
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">'
+        "<IsTruncated>false</IsTruncated>"
+        f"<Contents><Key>{key}</Key></Contents>"
+        "</ListBucketResult>"
+    )
+
+
+@responses.activate
+def test_ndfd_backfill_commits_days_before_a_mid_run_failure(settings, conn, monkeypatch):
+    """A download failure partway through a variable must leave every already-committed
+    issuance day durably upserted (per-day commit granularity), not roll the whole run back.
+
+    Listing window for start=end=07-10 is 07-05..07-11 (lookback + 1). Days 05/06/07 are
+    served normally; 07-08's download 404s (a non-retryable NDFDError). Days 05-07 must be
+    committed (2 stations x 1 message each = 2 rows/day), and 07-08 onward must be absent.
+    """
+    days = [date(2026, 7, d) for d in range(5, 12)]  # 07-05 .. 07-11
+    fail_day = date(2026, 7, 8)
+    for day in days:
+        key = f"wmo/maxt/{day:%Y/%m/%d}/YGUZ98_KWBN_{day:%Y%m%d}0600"
+        responses.get(f"{BUCKET}/", body=_listing_for(key))
+        if day == fail_day:
+            responses.get(f"{BUCKET}/{key}", status=404)
+        else:
+            responses.get(f"{BUCKET}/{key}", body="maxTemperature")
+    monkeypatch.setattr(
+        ndfd_backfill, "_decode_element_file", _fake_decode_returning({"maxTemperature": 300.0})
+    )
+    monkeypatch.setattr(ndfd_backfill, "_ensure_pygrib", lambda: (object(), np))
+
+    # every variable failed (the one requested variable errored) -> exit code 1 ...
+    assert run_ndfd_backfill(
+        settings, conn, date(2026, 7, 10), date(2026, 7, 10),
+        variables=["maxTemperature"], sleep_seconds=0,
+    ) == 1
+
+    # ... but the days that committed before the failure are durable, and no later day landed.
+    committed_days = conn.execute(
+        "SELECT DISTINCT CAST(issued_time AS DATE) FROM grid_forecasts ORDER BY 1"
+    ).fetchall()
+    assert [r[0] for r in committed_days] == [date(2026, 7, d) for d in (5, 6, 7)]
+    assert _scalar(conn, "SELECT count(*) FROM grid_forecasts") == 6  # 3 days x 2 stations
+
+    # http_cache marks committed alongside their rows -> a resume skips exactly those keys,
+    # and the failed day's key is NOT marked (so it will be retried).
+    cached = {r[0] for r in conn.execute("SELECT url FROM http_cache").fetchall()}
+    assert f"wmo/maxt/2026/07/07/YGUZ98_KWBN_202607070600" in cached
+    assert f"wmo/maxt/2026/07/08/YGUZ98_KWBN_202607080600" not in cached
+
+
+SAME_HOUR_LISTING_XML = """<?xml version="1.0" encoding="UTF-8"?>
+<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+  <IsTruncated>false</IsTruncated>
+  <Contents><Key>wmo/maxt/2026/07/10/YGUZ98_KWBN_202607100016</Key></Contents>
+  <Contents><Key>wmo/maxt/2026/07/10/YGUZ98_KWBN_202607100046</Key></Contents>
+</ListBucketResult>"""
+
+
+@responses.activate
+def test_ndfd_backfill_default_cadence_thins_same_hour_issuances(settings, conn, monkeypatch):
+    """Two issuances 30 min apart, same UTC hour: default hourly cadence keeps only the
+    earlier one, matching the live collector's own cadence (docs/runbook.md §1.1)."""
+    key1 = "wmo/maxt/2026/07/10/YGUZ98_KWBN_202607100016"
+    key2 = "wmo/maxt/2026/07/10/YGUZ98_KWBN_202607100046"
+    responses.get(f"{BUCKET}/", body=SAME_HOUR_LISTING_XML)
+    responses.get(f"{BUCKET}/{key1}", body="maxTemperature")
+    monkeypatch.setattr(
+        ndfd_backfill, "_decode_element_file", _fake_decode_returning({"maxTemperature": 300.0})
+    )
+    monkeypatch.setattr(ndfd_backfill, "_ensure_pygrib", lambda: (object(), np))
+
+    assert run_ndfd_backfill(
+        settings, conn, date(2026, 7, 10), date(2026, 7, 10),
+        variables=["maxTemperature"], sleep_seconds=0,
+    ) == 0
+
+    urls = [c.request.url or "" for c in responses.calls]
+    assert any(u.endswith(key1) for u in urls)
+    assert not any(u.endswith(key2) for u in urls)
+
+
+@responses.activate
+def test_ndfd_backfill_full_cadence_keeps_every_issuance(settings, conn, monkeypatch):
+    """`issuance_cadence_minutes=None` opts back into every archived issuance."""
+    key1 = "wmo/maxt/2026/07/10/YGUZ98_KWBN_202607100016"
+    key2 = "wmo/maxt/2026/07/10/YGUZ98_KWBN_202607100046"
+    responses.get(f"{BUCKET}/", body=SAME_HOUR_LISTING_XML)
+    responses.get(f"{BUCKET}/{key1}", body="maxTemperature")
+    responses.get(f"{BUCKET}/{key2}", body="maxTemperature")
+    monkeypatch.setattr(
+        ndfd_backfill, "_decode_element_file", _fake_decode_returning({"maxTemperature": 300.0})
+    )
+    monkeypatch.setattr(ndfd_backfill, "_ensure_pygrib", lambda: (object(), np))
+
+    assert run_ndfd_backfill(
+        settings, conn, date(2026, 7, 10), date(2026, 7, 10),
+        variables=["maxTemperature"], sleep_seconds=0, issuance_cadence_minutes=None,
+    ) == 0
+
+    urls = [c.request.url or "" for c in responses.calls]
+    assert any(u.endswith(key1) for u in urls)
+    assert any(u.endswith(key2) for u in urls)
 
 
 def test_ndfd_backfill_missing_pygrib_raises_clear_error(settings, conn, monkeypatch):
