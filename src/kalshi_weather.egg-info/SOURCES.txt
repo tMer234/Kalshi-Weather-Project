@@ -7,6 +7,7 @@ src/kalshi_weather/config.py
 src/kalshi_weather/db.py
 src/kalshi_weather/iem_client.py
 src/kalshi_weather/kalshi_client.py
+src/kalshi_weather/ndfd_client.py
 src/kalshi_weather/nws_client.py
 src/kalshi_weather/resolve.py
 src/kalshi_weather/time_utils.py
@@ -20,11 +21,13 @@ src/kalshi_weather/ingest/__init__.py
 src/kalshi_weather/ingest/common.py
 src/kalshi_weather/ingest/kalshi.py
 src/kalshi_weather/ingest/kalshi_backfill.py
+src/kalshi_weather/ingest/ndfd_backfill.py
 src/kalshi_weather/ingest/nws.py
 src/kalshi_weather/ingest/nws_backfill.py
 tests/test_backfills.py
 tests/test_cli_parser.py
 tests/test_ingest_upsert.py
 tests/test_kalshi_ingest.py
+tests/test_ndfd_backfill.py
 tests/test_nws_client.py
 tests/test_time_utils.py

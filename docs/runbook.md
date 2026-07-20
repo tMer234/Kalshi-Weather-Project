@@ -131,8 +131,10 @@ first — see that plan's "Running backfills safely against the GCS-hosted DB" s
 for the full `gh workflow disable`/`enable` steps. Not yet relevant: no workflows exist
 yet, so backfills today still just run directly against the local file below.
 
-There is no backfill for the fourth data stream (NWS grid forecasts / `grid_forecasts`)
-— see §2.1's last bullet.
+The grid-forecast backfill (NWS grid forecasts / `grid_forecasts`, via the NDFD GRIB2
+archive) was **built 2026-07-12** but, as of 2026-07-16, has **not yet been run** against
+the real archive — see §2.1's last bullet. (The CLI settlement backfill below **has** been
+run: `climate_reports` holds 4,339 `source='iem_afos'` rows, 2026-01-01 → 2026-07-08.)
 
 ### 2.1 `kalshi-weather backfill nws-cli` — historical settlement truth
 
@@ -157,9 +159,10 @@ kalshi-weather backfill nws-cli --start 2026-06-01 --end 2026-06-30 --station ny
   where it left off. Products that fail to parse are logged, skipped, and NOT marked, so
   a parser fix re-processes them on the next run.
 - **What this does NOT backfill**: forecast vintages (`grid_forecasts`). Historical
-  gridpoint forecasts only exist in the NDFD GRIB2 archive — a separate, unbuilt piece
-  documented as open work in the master plan (Phase 0c). Until then, residual-model
-  history is bounded by when live forecast collection started (2026-07-09).
+  gridpoint forecasts only exist in the NDFD GRIB2 archive — a separate command
+  (`backfill nws-grid`, **built 2026-07-12, not yet run** as of 2026-07-16; see the
+  "Built" bullet at the end of this section). Until it is run, residual-model history is
+  bounded by when live forecast collection started (2026-07-09).
   - **Scope if/when built** (decided 2026-07-12, see data dictionary §6.1): only the
     72h-max, same-day-excluded predictor window is needed, not the full ~168h NDFD
     archive horizon — cuts the download volume roughly 55–60% versus a naive full-week

@@ -121,15 +121,24 @@ class GridMessage:
     lons: Any
 
 
-def _message_window(grb, issued: datetime, period: bool) -> tuple[datetime, datetime]:
-    """[valid_start, valid_end) for one GRIB message, relative to its file's issuance."""
+def _validity_end(grb) -> datetime:
+    """End of a range/period message, from its validityDate+validityTime (HHMM), naive UTC."""
+    return datetime.strptime(f"{int(grb.validityDate):08d}{int(grb.validityTime):04d}", "%Y%m%d%H%M")
+
+
+def _message_window(grb, period: bool) -> tuple[datetime, datetime]:
+    """[valid_start, valid_end) for one GRIB message, from pygrib's decoded valid datetimes.
+
+    Deliberately does NOT parse startStep/endStep: real NDFD day1-3 messages carry
+    stepUnits=0 (minutes), so pygrib returns steps as unit-suffixed strings like '690m'
+    that int() can't parse, and those steps are offset from the GRIB reference time
+    (grb.analDate), not the file's transmission timestamp. grb.validDate (= analDate +
+    forecastTime) is the start of a statistically-processed period (max/min/accum) or the
+    instant of a point field, and lands on whole hours matching the live collector."""
+    valid_start = grb.validDate
     if period:
-        return (
-            issued + timedelta(hours=int(grb.startStep)),
-            issued + timedelta(hours=int(grb.endStep)),
-        )
-    start = issued + timedelta(hours=int(grb.endStep))
-    return start, start + timedelta(hours=1)
+        return valid_start, _validity_end(grb)
+    return valid_start, valid_start + timedelta(hours=1)
 
 
 def _decode_element_file(raw: bytes, issued: datetime, period: bool) -> list[GridMessage]:
@@ -149,7 +158,7 @@ def _decode_element_file(raw: bytes, issued: datetime, period: bool) -> list[Gri
         messages = []
         with pygrib.open(path) as gribs:
             for grb in gribs:
-                start, end = _message_window(grb, issued, period)
+                start, end = _message_window(grb, period)
                 if horizon_hours(issued, start) > MAX_HORIZON_HOURS:
                     continue
                 values = grb.values

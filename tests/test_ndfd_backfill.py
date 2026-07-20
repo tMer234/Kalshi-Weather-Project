@@ -89,19 +89,29 @@ def test_issued_time_from_key():
     assert issued_time_from_key(key) == datetime(2026, 7, 10, 6, 0)
 
 
-def test_message_window_period_uses_start_end_step():
-    grb = type("Grb", (), {"startStep": 12, "endStep": 24})()
-    issued = datetime(2026, 7, 10, 0, 0)
-    start, end = _message_window(grb, issued, period=True)
-    assert (start, end) == (issued + timedelta(hours=12), issued + timedelta(hours=24))
+def test_message_window_period_uses_valid_datetimes():
+    # Real NDFD maxt: minute step units -> pygrib gives validDate (period start) and
+    # validityDate/validityTime (period end); startStep/endStep are unit-suffixed strings.
+    start = datetime(2026, 7, 13, 12, 0)
+    end = datetime(2026, 7, 14, 0, 0)
+    grb = type("Grb", (), {"validDate": start, "validityDate": 20260714, "validityTime": 0})()
+    assert _message_window(grb, period=True) == (start, end)
 
 
 def test_message_window_instantaneous_synthesizes_1h_bucket():
-    grb = type("Grb", (), {"startStep": 6, "endStep": 6})()
-    issued = datetime(2026, 7, 10, 0, 0)
-    start, end = _message_window(grb, issued, period=False)
-    assert start == issued + timedelta(hours=6)
-    assert end == start + timedelta(hours=1)
+    start = datetime(2026, 7, 13, 1, 0)
+    grb = type("Grb", (), {"validDate": start})()
+    s, e = _message_window(grb, period=False)
+    assert s == start
+    assert e == start + timedelta(hours=1)
+
+
+def test_validity_end_zero_pads_time():
+    # validityTime is HHMM as an int: 0 -> 00:00, 100 -> 01:00.
+    from kalshi_weather.ingest.ndfd_backfill import _validity_end
+
+    assert _validity_end(type("G", (), {"validityDate": 20260714, "validityTime": 0})()) == datetime(2026, 7, 14, 0, 0)
+    assert _validity_end(type("G", (), {"validityDate": 20260713, "validityTime": 100})()) == datetime(2026, 7, 13, 1, 0)
 
 
 def test_nearest_value_picks_closest_gridcell():
@@ -122,9 +132,12 @@ def test_nearest_value_returns_none_for_masked_nan():
 
 
 class _FakeGrb:
-    def __init__(self, startStep, endStep, values, lats, lons):
-        self.startStep = startStep
-        self.endStep = endStep
+    def __init__(self, valid_start, valid_end, values, lats, lons):
+        # Mirrors the real pygrib attributes _message_window reads: validDate (a datetime,
+        # the period/instant start) and validityDate/validityTime (HHMM int, the end).
+        self.validDate = valid_start
+        self.validityDate = int(valid_end.strftime("%Y%m%d"))
+        self.validityTime = int(valid_end.strftime("%H%M"))
         self.values = values
         self._lats = lats
         self._lons = lons
@@ -165,11 +178,15 @@ def fake_pygrib(monkeypatch):
 
 def test_decode_element_file_filters_beyond_max_horizon(fake_pygrib):
     lats, lons = np.array([[40.0]]), np.array([[-74.0]])
-    in_range = _FakeGrb(6, 6, np.array([[300.0]]), lats, lons)
-    out_of_range = _FakeGrb(100, 100, np.array([[300.0]]), lats, lons)
+    issued = datetime(2026, 7, 10, 0, 0)
+    in_range = _FakeGrb(
+        issued + timedelta(hours=6), issued + timedelta(hours=18), np.array([[300.0]]), lats, lons
+    )
+    out_of_range = _FakeGrb(
+        issued + timedelta(hours=100), issued + timedelta(hours=112), np.array([[300.0]]), lats, lons
+    )
     fake_pygrib([in_range, out_of_range])
 
-    issued = datetime(2026, 7, 10, 0, 0)
     messages = _decode_element_file(b"unused", issued, period=True)
 
     assert len(messages) == 1
@@ -179,9 +196,10 @@ def test_decode_element_file_filters_beyond_max_horizon(fake_pygrib):
 def test_decode_element_file_unmasks_nan(fake_pygrib):
     lats, lons = np.array([[40.0]]), np.array([[-74.0]])
     masked = np.ma.masked_array([[300.0]], mask=[[True]])
-    fake_pygrib([_FakeGrb(1, 1, masked, lats, lons)])
+    issued = datetime(2026, 7, 10)
+    fake_pygrib([_FakeGrb(issued + timedelta(hours=1), issued + timedelta(hours=13), masked, lats, lons)])
 
-    messages = _decode_element_file(b"unused", datetime(2026, 7, 10), period=True)
+    messages = _decode_element_file(b"unused", issued, period=True)
 
     assert np.isnan(messages[0].values[0, 0])
 

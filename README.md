@@ -127,9 +127,14 @@ nearest-station auto-discovery runs only for cities missing from the config and 
 ## Layout
 
 ```
+.claude/agents/kalshi-quant.md  repo domain-expert subagent (data semantics, API facts,
+                             the master_plan.md math roadmap, GCS-hosted-DB operating
+                             rules) — see plans/agent_design_plan.md for the design review
 config/stations.yaml        station config incl. confirmed settlement stations + Kalshi series
 docs/data_dictionary.md     what every table/column MEANS (read before analysis)
 docs/runbook.md             how to RUN everything (ingests, backfills, cron, monitoring)
+docs/gcs_and_actions_setup.md  GCS bucket + WIF + GitHub Actions setup (canonical DB lives
+                             in GCS, kept in sync by 4 scheduled workflows)
 src/kalshi_weather/
   cli.py                    the `kalshi-weather` command (ingest/backfill subcommands)
   config.py                 .env + stations.yaml -> typed settings

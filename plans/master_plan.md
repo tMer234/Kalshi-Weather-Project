@@ -164,7 +164,9 @@ phase order doesn't change, only the calendar.
 >   was the single binding constraint on Phase 1's σ fitting (`grid_forecasts` history
 >   otherwise starting 2026-07-09) — now resolved as a build. **No backfills of any
 >   kind have been RUN against real data yet** in this repo's history; that's the
->   remaining step before Phase 1 can start.
+>   remaining step before Phase 1 can start. *(Superseded 2026-07-16 — the CLI
+>   settlement backfill has since been run; the grid backfill has not. See STATUS
+>   2026-07-16 below.)*
 >   **Source verified 2026-07-12** (corrects an earlier wrong assumption that only
 >   derived, hourly-instantaneous temp was archived): the public S3 bucket
 >   `noaa-ndfd-pds` archives **native per-element GRIB2 products for all 11
@@ -200,6 +202,26 @@ phase order doesn't change, only the calendar.
 >   `snowfallAmount` (§4.4). No snow fell in the July validation window, so the
 >   magnitude is still empirically unconfirmed — needs a winter overlap day before
 >   fully trusting it. Full breakdown: `docs/runbook.md` §2.1.
+
+> **STATUS 2026-07-16 (updated — supersedes the "no backfills run" claim above):**
+> Read-only audit of the GCS-hosted canonical DB (pulled to a local working copy) shows
+> backfill run-status is now **mixed**, not "none run":
+> - **CLI settlement backfill (`backfill nws-cli`, IEM AFOS) — HAS RUN.** `climate_reports`
+>   holds **4,339 rows with `source='iem_afos'`** across all 6 stations, spanning obs_date
+>   **2026-01-01 → 2026-07-08** (~194–196 `max_temp` days/station); live collection
+>   (`source='nws_api'`) picks up 2026-07-09 onward. The settlement plane is in good shape.
+> - **NDFD grid-forecast backfill (`backfill nws-grid`) — NOT RUN.** `grid_forecasts` is
+>   **100% `source='nws_api'`**, only ~4 days deep (issued 2026-07-12 → 07-16; valid
+>   through 07-19); **zero `source='ndfd_archive'` rows**. This is the binding constraint
+>   on this phase's gate: the residual dataset is an inner join of forecasts × settlement,
+>   and the settlement side is ~195 days deep while the forecast side is ~4 — so running
+>   this backfill (start 2026-01-01, up to the live-collection boundary) is the single
+>   remaining step to unblock Phase 1's σ fitting.
+> - **Kalshi candlestick backfill (`backfill kalshi`) — NOT RUN.** `market_candles` is
+>   empty; `market_snapshots` holds only live data (~16h as of the audit). This feeds
+>   Phase 8's quoting simulator, not the Phase 0c/1 residual gate, so it's lower priority.
+> - Scheduled ingestion is confirmed live: all four GitHub Actions workflows show real
+>   `event:"schedule"` runs completing successfully (audited 2026-07-16).
 
 **Math/stats & sources:**
 | Concept | Source |

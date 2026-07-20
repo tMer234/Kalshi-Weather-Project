@@ -29,12 +29,24 @@ ad hoc context each session:
   packages. An agent that already knows the DB schema, the upsert/idempotency patterns,
   and the test-fixture style will extend it more consistently than one that re-reads
   everything from scratch each time.
+- **An operationally hazardous canonical datastore.** As of 2026-07-16 the canonical
+  `weather.duckdb` lives in a private GCS bucket (`gs://kalshi-weather-prediction-db1`),
+  kept in sync by four scheduled GitHub Actions workflows (`plans/data_automation_plan.md`,
+  `docs/gcs_and_actions_setup.md`). A local file is now only ever a point-in-time working
+  copy — a backfill or any other local write that gets pushed back without first pausing
+  those workflows and pulling a fresh copy can silently discard live-collected data with no
+  error (DuckDB files aren't mergeable; the upload just overwrites the whole object). This
+  is exactly the class of fact — expensive to rediscover, catastrophic to get wrong once —
+  this agent exists to hold permanently rather than leave to per-session memory recall.
 
 ## 2. Scope & non-goals
 
 **In scope:** anything touching `src/kalshi_weather/**`, `schema.sql`, `scripts/*ingest*`,
-the DuckDB schema/data semantics, `tests/**`, and implementing/reviewing the math phases in
-`master_plan.md`.
+the DuckDB schema/data semantics, `tests/**`, implementing/reviewing the math phases in
+`master_plan.md`, and the GCS-hosted canonical DB's operational lifecycle — pausing/
+resuming the four `ingest-*` GitHub Actions workflows around a safe backfill, the
+pull/push discipline, and verifying scheduled runs actually fire (`gh run list`), per
+`docs/gcs_and_actions_setup.md` and `plans/data_automation_plan.md`.
 
 **Non-goals for v1:**
 - Not a general-purpose repo agent — for unrelated chores (README typo fixes, git hygiene)
@@ -58,10 +70,13 @@ work, not delegate it further) and `Artifact` (not this project's output medium)
 
 Rationale for the notable inclusions:
 - **Bash** — needed to run `pytest`, query the DuckDB file via the `duckdb` CLI/Python for
-  EDA, and run the ingest scripts. Inherits this project's existing permission rules
-  (`.claude/settings.json` already denies `Read(references/**)` and
-  `Read(data/**/*.duckdb)` at the project level — those apply regardless of this agent's
-  own tool list).
+  EDA, run the ingest scripts, and — now that the canonical DB lives in GCS — drive `gh`
+  (pause/resume the four `ingest-*` workflows, check `gh run list` for scheduled-run
+  health) and `gcloud storage cp` (pull/push against `gs://kalshi-weather-prediction-db1`,
+  ideally with `--if-generation-match` to fail loudly instead of silently clobbering).
+  Inherits this project's existing permission rules (`.claude/settings.json` already
+  denies `Read(references/**)` and `Read(data/**/*.duckdb)` at the project level — those
+  apply regardless of this agent's own tool list).
 - **NotebookEdit** — `master_plan.md` explicitly calls for EDA notebooks (residual
   histograms, QQ-plots, reliability diagrams) in a gitignored `notebooks/` dir starting
   Phase 1.
@@ -210,6 +225,12 @@ those are the source of truth and this prompt will drift.
 - Chronological splits only for any train/val/test work; no k-fold, no look-ahead — this is
   called out three separate times in the master plan because it's the easiest thing to get
   wrong by reflex (importing `sklearn.model_selection.KFold` out of habit).
+- Never push a local `weather.duckdb` to GCS without first pausing all four live workflows
+  and pulling a fresh copy immediately beforehand — a stale local file pushed after even a
+  short delay can silently overwrite live-collected quote snapshots or forecast vintages
+  with no error (§ below, "Operating the GCS-hosted canonical DB"). Confirm with the user
+  before disabling/re-enabling the live workflows — it's shared production state, not a
+  purely local action.
 
 ## 8. Proposed agent file
 
@@ -249,9 +270,49 @@ Two data planes, almost every analysis mistake comes from blurring them:
   definitions, quote history, and settlement results. Independent collector
   (`kalshi_ingest.py`), no API key needed.
 
+The canonical `weather.duckdb` lives in a private GCS bucket
+(`gs://kalshi-weather-prediction-db1`), kept current by four scheduled GitHub Actions
+workflows (`ingest-kalshi-quotes` every 10 min, `ingest-nws-grid` hourly,
+`ingest-kalshi-resolutions`/`ingest-nws-cli` at 03:00 & 15:00 UTC — all four share
+`concurrency: group: weather-db` so GitHub serializes their writes). A local
+`data/weather.duckdb` is **only ever a point-in-time working copy** — treat it as stale the
+moment any time has passed since the last pull, never as authoritative on its own.
+
 Full column-by-column semantics live in `docs/data_dictionary.md` — read it before writing
 or reasoning about any query against real data; this prompt only covers what's stable and
 non-obvious enough to be worth repeating unprompted.
+
+## Operating the GCS-hosted canonical DB
+
+Full setup/rationale: `docs/gcs_and_actions_setup.md` and `plans/data_automation_plan.md`.
+The one rule that matters operationally:
+
+**Never run a local backfill (or any other write meant to be pushed back) against
+`data/weather.duckdb` without first pulling a fresh copy from GCS, and never push the
+result back without first pausing the four live workflows.** A local file can go stale in
+minutes (the quotes workflow writes every 10 min); pushing a stale file overwrites the
+*entire* GCS object, including anything a live workflow wrote in the meantime — DuckDB
+files aren't mergeable, so this is silent, total data loss for that window, not a
+recoverable conflict.
+
+Procedure, in order, every time:
+1. `gh workflow disable ingest-kalshi-quotes.yml ingest-kalshi-resolutions.yml ingest-nws-grid.yml ingest-nws-cli.yml`
+2. `gcloud storage cp gs://kalshi-weather-prediction-db1/weather.duckdb data/weather.duckdb`
+   — capture the object's `generation` first if using the `--if-generation-match`
+   precondition on the eventual upload (recommended: turns a forgotten-pause mistake into a
+   loud failure instead of a silent overwrite).
+3. Run the backfill/write.
+4. `gcloud storage cp data/weather.duckdb gs://kalshi-weather-prediction-db1/weather.duckdb`
+5. `gh workflow enable ingest-kalshi-quotes.yml ingest-kalshi-resolutions.yml ingest-nws-grid.yml ingest-nws-cli.yml`
+
+**Confirm with the user before steps 1 and 5** — disabling/enabling live workflows is
+shared production state, not a purely local action, even though it's the documented safe
+procedure. Don't skip confirmation just because the steps are well-established.
+
+To sanity-check whether the live workflows are actually firing on schedule (not just
+configured), `gh run list --workflow=<file> --json databaseId,status,conclusion,createdAt,event`
+and look for `event: "schedule"` entries — a `workflow_dispatch` success only proves the
+pipeline itself works, not that the cron trigger is firing.
 
 ## Facts that already cost debugging time — trust these, don't re-derive
 
@@ -354,6 +415,8 @@ discrete binary settlement, and adopting one would fight the data model at every
   higher-scrutiny than the rest; implement and reason about it, but treat "actually enable
   live trading" as a decision for the user to make explicitly, not something to reach for
   as a natural next step.
+- Never push to the GCS-hosted canonical DB without the pause → pull → run → push → resume
+  procedure above, and always confirm before pausing/resuming the live workflows.
 ```
 
 ## 9. Open decisions for you to confirm before I create anything
@@ -367,13 +430,19 @@ discrete binary settlement, and adopting one would fight the data model at every
    anyone who clones it) vs. keeping it user-scoped (`~/.claude/agents/`, local only)?
    Recommend committing — it's project knowledge, not personal preference, same reasoning
    as `CLAUDE.md`.
+4. **Autonomy over the live GitHub Actions workflows (added 2026-07-16).** The agent now
+   needs `gh workflow disable`/`enable` to run backfills safely against the GCS-hosted DB
+   (§6, "Operating the GCS-hosted canonical DB"). Recommend it always confirms with you
+   before pausing/resuming them, rather than treating that as routine — fine with that, or
+   would you prefer it act autonomously since the procedure is already fully documented?
 
 ## 10. Rollout steps (once confirmed)
 
 1. Run the plugin installs (if approved).
 2. Write `.claude/agents/kalshi-quant.md` from §8.
-3. Smoke-test: invoke it for something concrete already in flight (e.g. reviewing the new
-   `kalshi_ingest.py` / `kalshi_client.py` files sitting uncommitted right now) and confirm
-   it applies the facts in §6 without being told them.
+3. Smoke-test: invoke it for something concrete already in flight — e.g. asking it to run
+   the safe-backfill procedure end to end, or to diagnose why a scheduled workflow hasn't
+   fired — and confirm it applies the facts in §6 (including the GCS operational rules)
+   without being told them.
 4. Note in `README.md`'s Layout section that the agent exists, so it isn't orphaned
    knowledge.

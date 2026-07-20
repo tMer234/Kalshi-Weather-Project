@@ -9,3 +9,7 @@ typer>=0.15
 [dev]
 pytest>=8.0
 responses>=0.25
+
+[ndfd]
+pygrib>=2.1
+numpy>=1.24
